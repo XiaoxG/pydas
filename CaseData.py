@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import scipy.io as sio
 from scipy.signal import correlate, butter, lfilter, freqz
+import matplotlib.pyplot as plt
 
 class CaseData:
     """
@@ -292,13 +293,6 @@ class CaseData:
         self.segStatis[0].loc[name] = [np.mean(series), np.std(series),
                                        np.amax(series), np.amin(series), unit]
         self.data[0].insert(self.chN, name, series)
-        chInfo_dic = {'Name': name,
-                        'Unit': unit,
-                        'Coef': 1}
-        Column = ['Name', 'Unit', 'Coef']
-        chIdx = '{0:02d}'.format(self.chN + 1)
-        addchInfo = pd.DataFrame(chInfo_dic, index=chIdx, columns=Column)
-        self.chInfo = pd.concat([self.chInfo, addchInfo])
         self.chN += 1
 
     def delCh(self, name):
@@ -310,6 +304,7 @@ class CaseData:
 
         self.chInfo = self.chInfo.drop(
             self.chInfo.index[self.chInfo.Name == name])
+        self.chInfo.index = np.arange(1, len(self.chInfo)+1)
         for iseg in range(self.segN):
             self.segStatis[iseg] = self.segStatis[iseg].drop(name)
             del self.data[iseg][name]
@@ -376,36 +371,58 @@ class CaseData:
                 os.path.splitext(self.filename)[0] + '_ChInfo.xlsx'
             self.chInfo.to_excel(file_name, sheet_name='Sheet01')
 
-    def to_dat(self, sseg='all'):
+    def to_dat(self, 
+               header = True,
+               time = True,
+               sseg='all'):
         def writefile(self, idx):
             path = os.getcwd()
             if self.scale == 'model':
                 filename = path + '/' + \
                     os.path.splitext(self.filename)[
-                        0] + '_seg{0:02d}-model.txt'.format(idx)
-                hearder_fmt_str = 'File: {0:s}, Seg{1:02d}, fs:{2:4d}Hz\nDate: {3:5s} from: {4:8s} to {5:8s}\nNote:{6:s}\n'
-                header2write = hearder_fmt_str.format(
-                    self.filename, idx, self.fs, self.date,
-                    self.segInfo['Start'].iloc[idx], self.segInfo['Stop'].iloc[idx],
-                    self.segInfo['Note'].iloc[idx])
+                        0] + '_seg{0:02d}-model.dat'.format(idx)
+                # hearder_fmt_str = 'File: {0:s}, Seg{1:02d}, fs:{2:4d}Hz\nDate: {3:5s} from: {4:8s} to {5:8s}\nNote:{6:s}\n'
+                # header2write = hearder_fmt_str.format(
+                #     self.filename, idx, self.fs, self.date,
+                #     self.segInfo['Start'].iloc[idx], self.segInfo['Stop'].iloc[idx],
+                #     self.segInfo['Note'].iloc[idx])
             else:
                 filename = path + '/' + \
                     os.path.splitext(self.filename)[
-                        0] + '_seg{0:02d}-full.txt'.format(idx)
-                hearder_fmt_str = 'File: {0:s}, Seg{1:02d}, fs:{2:4d}Hz(model scale)\nDate: {3:5s} from: {4:8s} to {5:8s}\nNote:{6:s}\nFull scale results, scale ratio = {7:02d}\n'
-                header2write = hearder_fmt_str.format(
-                    self.filename, idx, self.fs, self.date,
-                    self.segInfo['Start'].iloc[idx], self.segInfo['Stop'].iloc[idx],
-                    self.segInfo['Note'].iloc[idx], self.lam)
-            comments = '\t'.join(
-                self.chInfo['Name']) + '\n' + '\t'.join(self.chInfo['Unit']) + '\n'
-            header2write += comments
-            infoFile = open(filename, 'w')
-            infoFile.write(header2write)
-            data2write = self.data[idx].to_string(header=False,
-                                                  index=False, justify='left', float_format='% .5E')
-            infoFile.write(data2write)
-            infoFile.close()
+                        0] + '_seg{0:02d}-full.dat'.format(idx)
+                # hearder_fmt_str = 'File: {0:s}, Seg{1:02d}, fs:{2:4d}Hz(model scale)\nDate: {3:5s} from: {4:8s} to {5:8s}\nNote:{6:s}\nFull scale results, scale ratio = {7:02d}\n'
+                # header2write = hearder_fmt_str.format(
+                #     self.filename, idx, self.fs, self.date,
+                #     self.segInfo['Start'].iloc[idx], self.segInfo['Stop'].iloc[idx],
+                #     self.segInfo['Note'].iloc[idx], self.lam)
+            
+            header2write = 'Time '+' '.join(
+                self.chInfo['Name']) + '\n' + 'S ' + ' '.join(self.chInfo['Unit']) + '\n'
+            
+            if time == True:
+                N = self.data[idx].values.shape[0]
+                M = self.data[idx].values.shape[1]
+                datawrite = np.zeros((N,M+1))
+                if self.scale == 'model':
+                    for i in range(0, N):
+                        datawrite[i,0] = i/self.fs
+                else:
+                    for i in range(0, N):
+                        datawrite[i,0] = i/self.fs
+                datawrite[:,1:M+2] = self.data[idx].values
+                if header == True:
+                    np.savetxt(filename,datawrite,fmt = '% .5E',delimiter=' ', header = header2write)
+                else:
+                    np.savetxt(filename,datawrite,fmt = '% .5E',delimiter=' ')
+            else:
+                data2write = self.data[idx].to_string(header=False,
+                                                        index=False, justify='left', float_format='% .5E')
+                infoFile = open(filename, 'w')
+                if header == True:
+                    header2write = ' '.join(self.chInfo['Name']) + '\n' + ' '.join(self.chInfo['Unit']) + '\n'
+                    infoFile.write(header2write)
+                infoFile.write(data2write)
+                infoFile.close()
             print('Export: {0:s}'.format(filename))
 
         if sseg == 'all':
@@ -453,19 +470,15 @@ class CaseData:
         if isinstance(sseg, int):
             if sseg <= self.segN:
                 data_dic = {'Data': self.data[sseg].values,
-                            'chInfo': self.chInfo,
+                            'chName': self.chInfo['Name'].values,
+                            'chUnit': self.chInfo['Unit'].values,
                             'Date': self.date,
-                            'Nseg': 1,
                             'fs': self.fs,
                             'chN': self.chN,
-                            'Seg_sta': self.segStatis[sseg],
-                            'SegInfo': self.segInfo[sseg:sseg + 1],
-                            'Readme': 'Generated by CaseData from python'
+                            'Readme': 'Generated by CaseData from python, SKLOE/SJTU'
                             }
                 path = os.getcwd()
-                fname = path + '/' + \
-                    os.path.splitext(self.filename)[0] +\
-                    '_seg{:02d}.mat'.format(sseg)
+                fname = path + '/' + os.path.splitext(self.filename)[0]
                 sio.savemat(fname, data_dic)
                 print('Export: {0:s}'.format(fname))
             else:
@@ -568,7 +581,8 @@ class CaseData:
             self.chInfo['CoeffUnit'] = transCoeffUnit
             self.chInfo['CoeffRho'] = transCoeffRho
             self.chInfo['CoeffLam'] = transCoeffLam
-
+            self.fs = self.fs / np.sqrt(self.lam)
+            print('lambda = {00:2d}'.format(self.lam))
             if pInfo:
                 print(self.chInfo.to_string(justify='center'))
 
@@ -583,7 +597,7 @@ class CaseData:
             print('The data is upscaled.')
 
     def read_waveCal(self,
-                    wavefname, 
+                    wavefname,
                     waveChName,
                     waveUnit,
                     sseg = 0,
@@ -609,6 +623,7 @@ class CaseData:
                     waveCalDataInterp, index=index, columns=waveChName)
                 self.data[sseg] = pd.concat(
                     [self.data[sseg], waveCalDF], axis=1, join_axes=[self.data[sseg].index]).fillna(0.0)
+                print('Wave move points: {: d}'.format(YBlag))
             else:
                 waveCalDF = pd.DataFrame(
                     waveCalDataInterp, columns=waveChName)
@@ -625,8 +640,14 @@ class CaseData:
             #     chIdx.append('{0:02d}'.format(idx + self.chN + 1))
             waveCalchInfo = pd.DataFrame(chInfo_dic, index=chIdx, columns=Column)
             self.chInfo = pd.concat([self.chInfo, waveCalchInfo])
+            self.chInfo.index = np.arange(1, len(self.chInfo)+1)
             self.chN += nCh
-
+            for i, name in enumerate(waveChName):
+                series = waveCalDataInterp[:,i]
+                unit = waveUnit[i]
+                self.segStatis[0].loc[name] = [np.mean(series), np.std(series),
+                                       np.amax(series), np.amin(series), unit]
+            
     def move_ccor(self,
                  to_move_chName,
                  base_chName,
@@ -645,23 +666,61 @@ class CaseData:
         temp = pd.concat([self.data[sseg], toMoveDF], axis=1, join_axes=[self.data[sseg].index]).fillna(0.0)
 
         self.data[sseg][to_move_chName] = temp['to move'].values
-        
+    
+    def motion_ccor(self,
+                    accChName,
+                    sseg = 0):
+        def diff1d(y, dx):
+            """Calculate the first-order derivative of the signal y.
+            @param: y - the signal
+            @param: dx - interval"""
+
+            y = np.asarray(y, dtype='float')
+            dy = np.zeros_like(y)
+            if y.shape[0] <= 5:
+                warnings.warn("Array size is too small!")
+                return dy
+            else:
+                dy[0] = (-y[2] + 4 * y[1] - 3 * y[0]) / (2 * dx)
+                dy[1] = (-y[3] + 6 * y[2] - 3 * y[1] - 2 * y[0]) / (6 * dx)
+                dy[2] = (8 * (y[3] - y[1]) - (y[4] - y[0])) / (12 * dx)
+                dy[3:-3] = (45 * (y[4:-2] - y[2:-4]) - 9 *
+                            (y[5:-1] - y[1:-5]) + (y[6:] - y[:-6])) / (60 * dx)
+                dy[-3] = (8 * (y[-2] - y[-4]) - (y[-1] - y[-5])) / (12 * dx)
+                dy[-2] = (2 * y[-1] + 3 * y[-2] - 6 * y[-3] + y[-4]) / (6 * dx)
+                dy[-1] = (3 * y[-1] - 4 * y[-2] + y[-3]) / (2 * dx)
+                return dy
+        vz = diff1d(self.data[0]['Heave'].values,1/self.fs)
+        az = diff1d(vz,1/self.fs)
+        n_sample = vz.shape[0]
+        base = self.data[sseg][accChName]
+        lag = np.argmax(correlate(base.values, az, method='fft')) - n_sample + 1
+        print('Motion move points: {: d}'.format(lag))
+        new_index = range(n_sample) + lag
+        for ich in ['Surge','Sway','Heave','Roll','Pitch','Yaw']:
+            toMove = self.data[sseg][ich]
+            toMove_dic = {'to move': toMove.values}
+            toMoveDF = pd.DataFrame(toMove_dic, index=new_index)
+            temp = pd.concat([self.data[sseg], toMoveDF], axis=1, join_axes=[self.data[sseg].index]).fillna(0.0)
+            self.data[sseg][ich] = temp['to move'].values
+
     def changeChOder(self,
                     newOrder,
                     sseg = 0):
-        if newOrder.shape[0] == self.chN:
-            self.data[sseg] = self.data[sseg][newOrder]
-            indexNew = []
+            indexNew = []        
             for inewOrder in newOrder:
-                indexNew.append(list(self.data[sseg].columns).index(inewOrder))
+                indexNew.append(list(self.data[sseg].columns).index(inewOrder)+1)
             self.chInfo = self.chInfo.reindex(indexNew)
-            
+            self.segStatis = self.chInfo.reindex(indexNew)
+            self.segStatis.index = np.arange(1, len(self.chInfo)+1)
+            self.chInfo.index = np.arange(1, len(self.chInfo)+1)
+            self.data[sseg] = self.data[sseg][newOrder]
+           
             #self.chInfo.index = range(1,self.chN+1)
-        else:
-            print('The size of new orders are not equal to chN.')
 
     def lowpassFilter(self,
                     chName,
+                    out = False,
                     cutoffull=2,
                     sseg=0,
                     order = 6):
@@ -681,6 +740,28 @@ class CaseData:
         data = self.data[sseg][chName].values
         self.data[sseg][chName] = butter_lowpass_filter(data, cutoff, self.fs, order)
 
+    def highpassFilter(self,
+                    chName,
+                    cutoffull = 2,
+                    sseg = 0,
+                    order = 6):
+
+        def butter_highpass(cutoff, fs, order=5):
+            nyq = 0.5 * fs
+            normal_cutoff = cutoff / nyq
+            b, a = butter(order, normal_cutoff, btype='high', analog=False)
+            return b, a
+
+        def butter_highpass_filter(data, cutoff, fs, order=5):
+            b, a = butter_highpass(cutoff, fs, order=order)
+            y = lfilter(b, a, data)
+            return y
+
+        cutoff = cutoffull / 2 / np.pi * np.sqrt(self.lam)
+        print('Attention, Lambda = {0:02d}'.format(self.lam))
+        data = self.data[sseg][chName].values
+        self.data[sseg][chName] = butter_highpass_filter(data, cutoff, self.fs, order)
+        
     def rmMean(self,
                 chName,
                 sseg = 0):
@@ -703,7 +784,6 @@ class CaseData:
         # self.segInfo['Stop']['Seg{0:2d}'.format(sseg)] = ''
         self.segInfo['Duration']['Seg{0:2d}'.format(sseg)] = '{0:8.1f}s'.format((sampNum- 1) / self.fs)
         self.segInfo['N sample']['Seg{0:2d}'.format(sseg)] = sampNum
-
 
     # def read_motion(self,
     #                 motionfname,
