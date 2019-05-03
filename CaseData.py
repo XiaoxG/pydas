@@ -9,7 +9,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import scipy.io as sio
-from scipy.signal import correlate, butter, lfilter, freqz
+from scipy.signal import correlate, butter, lfilter, freqz, filtfilt
 import matplotlib.pyplot as plt
 
 class CaseData:
@@ -293,7 +293,8 @@ class CaseData:
         self.segStatis[0].loc[name] = [np.mean(series), np.std(series),
                                        np.amax(series), np.amin(series), unit]
         self.data[0].insert(self.chN, name, series)
-        self.chN += 1
+        self.updateChN()
+        print(name + 'has been added')
 
     def delCh(self, name):
         """Drop channel(s) of the case data"""
@@ -313,10 +314,8 @@ class CaseData:
         # print(self.segStatis[0])
         # print(self.data[0])
         # update the number of channels
-        if self.data[0].shape[1] == self.chInfo.shape[0] == self.segStatis[0].shape[0]:
-            self.chN = self.chInfo.shape[0]
-        else:
-            raise ValueError("Number of channels does not match!")
+        self.updateChN()
+        print(name + ' has been removed')
 
     def pickCh(self, chnames):
         "pick out the channels in chnames and drop the rest"
@@ -592,8 +591,8 @@ class CaseData:
                     C2 = rho ** self.chInfo['CoeffRho'].iloc[idx2]
                     C3 = self.lam ** self.chInfo['CoeffLam'].iloc[idx2]
                     C = C1 * C2 * C3
-                    self.data[idx1][name] *= C
-
+                    self.data[idx1][name] *= C       
+            self.updateST(sseg = 0)
             print('The data is upscaled.')
 
     def read_waveCal(self,
@@ -645,8 +644,9 @@ class CaseData:
             for i, name in enumerate(waveChName):
                 series = waveCalDataInterp[:,i]
                 unit = waveUnit[i]
-                self.segStatis[0].loc[name] = [np.mean(series), np.std(series),
+                self.segStatis[sseg].loc[name] = [np.mean(series), np.std(series),
                                        np.amax(series), np.amin(series), unit]
+            print('Calibrated waves and YB added.')
             
     def move_ccor(self,
                  to_move_chName,
@@ -690,6 +690,7 @@ class CaseData:
                 dy[-2] = (2 * y[-1] + 3 * y[-2] - 6 * y[-3] + y[-4]) / (6 * dx)
                 dy[-1] = (3 * y[-1] - 4 * y[-2] + y[-3]) / (2 * dx)
                 return dy
+
         vz = diff1d(self.data[0]['Heave'].values,1/self.fs)
         az = diff1d(vz,1/self.fs)
         n_sample = vz.shape[0]
@@ -707,21 +708,25 @@ class CaseData:
     def changeChOder(self,
                     newOrder,
                     sseg = 0):
-            indexNew = []        
-            for inewOrder in newOrder:
-                indexNew.append(list(self.data[sseg].columns).index(inewOrder)+1)
-            self.chInfo = self.chInfo.reindex(indexNew)
-            self.segStatis = self.chInfo.reindex(indexNew)
-            self.segStatis.index = np.arange(1, len(self.chInfo)+1)
-            self.chInfo.index = np.arange(1, len(self.chInfo)+1)
-            self.data[sseg] = self.data[sseg][newOrder]
-           
+            if len(newOrder) == self.chN:
+                indexNew = []      
+                for inewOrder in newOrder:
+                    indexNew.append(list(self.data[sseg].columns).index(inewOrder)+1)
+                self.chInfo = self.chInfo.reindex(indexNew)
+                self.segStatis[sseg] = self.segStatis[sseg].reindex(newOrder)
+                self.chInfo.index = np.arange(1, len(self.chInfo)+1)
+                self.data[sseg] = self.data[sseg][newOrder]
+                self.updateChN()
+                print('Changed the Channel order.')
+            else:
+                raise ValueError("Number of channels does not match!")
             #self.chInfo.index = range(1,self.chN+1)
 
     def lowpassFilter(self,
                     chName,
-                    out = False,
                     cutoffull=2,
+                    replace = True,
+                    returnValue = False,
                     sseg=0,
                     order = 6):
         def butter_lowpass(cutoff, fs, order=5):
@@ -732,17 +737,28 @@ class CaseData:
 
         def butter_lowpass_filter(data, cutoff, fs, order=5):
             b, a = butter_lowpass(cutoff, fs, order=order)
-            y = lfilter(b, a, data)
+            y = filtfilt(b, a, data)
             return y
 
-        cutoff = cutoffull / 2 / np.pi * np.sqrt(self.lam)
-        print('Attention, Lambda = {0:02d}'.format(self.lam))
+        if self.scale == 'model':
+            cutoff = cutoffull / 2 / np.pi * np.sqrt(self.lam)
+        else:
+            cutoff = cutoffull / 2 / np.pi
+
         data = self.data[sseg][chName].values
-        self.data[sseg][chName] = butter_lowpass_filter(data, cutoff, self.fs, order)
+        if replace == True:
+            self.data[sseg][chName] = butter_lowpass_filter(data, cutoff, self.fs, order)
+        if returnValue == True:
+            dataOut = butter_lowpass_filter(data, cutoff, self.fs, order)
+            return dataOut
+        self.updateST(chName = chName)
+        print('Lowpass for '+chName+ ' filter = {0:3.2f}, Lambda = {1:02d}'.format(cutoffull, self.lam))
 
     def highpassFilter(self,
                     chName,
                     cutoffull = 2,
+                    replace = True,
+                    returnValue = False,
                     sseg = 0,
                     order = 6):
 
@@ -754,19 +770,28 @@ class CaseData:
 
         def butter_highpass_filter(data, cutoff, fs, order=5):
             b, a = butter_highpass(cutoff, fs, order=order)
-            y = lfilter(b, a, data)
+            y = filtfilt(b, a, data)
             return y
-
-        cutoff = cutoffull / 2 / np.pi * np.sqrt(self.lam)
-        print('Attention, Lambda = {0:02d}'.format(self.lam))
+        if self.scale == 'model':
+            cutoff = cutoffull / 2 / np.pi * np.sqrt(self.lam)
+        else:
+            cutoff = cutoffull / 2 / np.pi
         data = self.data[sseg][chName].values
-        self.data[sseg][chName] = butter_highpass_filter(data, cutoff, self.fs, order)
+        if replace == True:
+            self.data[sseg][chName] = butter_highpass_filter(data, cutoff, self.fs, order)
+        if returnValue == True:
+            dataOut = butter_highpass_filter(data, cutoff, self.fs, order)
+            return dataOut
+        self.updateST(chName = chName)
+        print('Highpass for '+chName+ ' filter = {0:3.2f}, Lambda = {1:02d}'.format(cutoffull, self.lam))
         
     def rmMean(self,
                 chName,
                 sseg = 0):
         data = self.data[sseg][chName].values
         self.data[sseg][chName] = data-data.mean()
+        self.updateST(chName = chName)
+        print('remove mean for '+chName)
 
     def cutSeries(self,
                     start,
@@ -784,6 +809,8 @@ class CaseData:
         # self.segInfo['Stop']['Seg{0:2d}'.format(sseg)] = ''
         self.segInfo['Duration']['Seg{0:2d}'.format(sseg)] = '{0:8.1f}s'.format((sampNum- 1) / self.fs)
         self.segInfo['N sample']['Seg{0:2d}'.format(sseg)] = sampNum
+        self.updateST(sseg = sseg)
+        print('Cut time series from {0:5.2f}s to {1:5.2f}s'.format(start, stop))
 
     # def read_motion(self,
     #                 motionfname,
@@ -810,3 +837,112 @@ class CaseData:
     #         for i in range(waveCalDataInterp.shape[1]):
     #             waveCalDataInterp[:, i] = np.interp(
     #                 tInterp, t, waveCalDataRaw[:, i + 1])
+
+    def updateST(self,
+                chName = 'all',
+                sseg = 0):
+        if chName == 'all':
+            for i, name in enumerate(self.chInfo['Name'].values):
+                series = self.data[sseg][name].values
+                unit = self.chInfo['Unit'].values[i]
+                self.segStatis[sseg].loc[name] = [np.mean(series), np.std(series),
+                                    np.amax(series), np.amin(series), unit]
+        else:
+            if chName in self.chInfo['Name'].values:
+                series = self.data[sseg][chName].values
+                unitN = np.where(self.chInfo['Name'].values==chName)[0][0]
+                unit = self.chInfo['Unit'].values[unitN]
+                self.segStatis[sseg].loc[chName] = [np.mean(series), np.std(series),
+                                    np.amax(series), np.amin(series), unit]
+            else:
+                print('ERROR! {0:8s} not found.'.format(chName))
+
+    def updateChN(self):
+        if self.data[0].shape[1] == self.chInfo.shape[0] == self.segStatis[0].shape[0]:
+            self.chN = self.chInfo.shape[0]
+        else:
+            raise ValueError("Number of channels does not match!")
+    
+    def renameCh(self,
+                    chOld,
+                    chNew,
+                    sseg = 0):
+        if chOld in self.chInfo['Name'].values:
+            if chNew not in self.chInfo['Name'].values:
+                self.data[sseg] = self.data[sseg].rename(columns={chOld: chNew})
+                self.chInfo = self.chInfo.replace({'Name': chOld}, chNew)
+                self.segStatis[sseg] = self.segStatis[sseg].rename(index={chOld: chNew})
+            else:
+                print('The new name {0:8s} is invalid.'.format(chNew))
+        else:
+            print('{0:8s} is not in the channel list.'.format(chOld))
+    
+    def LHfreAnaly(self,
+                    sseg = 0,
+                    cutperiod = 24,
+                    Ncut = 10,
+                    pScreen = True,
+                    printExcel = True,
+                    printTxt = False):
+        def butter_lowpass(cutoff, fs, order=5):
+            nyq = 0.5 * fs
+            normal_cutoff = cutoff / nyq
+            b, a = butter(order, normal_cutoff, btype='low', analog=False)
+            return b, a
+
+        def butter_lowpass_filter(data, cutoff, fs, order=5):
+            b, a = butter_lowpass(cutoff, fs, order=order)
+            y = filtfilt(b, a, data)
+            return y
+
+        def butter_highpass(cutoff, fs, order=5):
+            nyq = 0.5 * fs
+            normal_cutoff = cutoff / nyq
+            b, a = butter(order, normal_cutoff, btype='high', analog=False)
+            return b, a
+
+        def butter_highpass_filter(data, cutoff, fs, order=5):
+            b, a = butter_highpass(cutoff, fs, order=order)
+            y = filtfilt(b, a, data)
+            return y
+        
+        if self.scale == 'model':
+            cutoff = 1 / cutperiod * np.sqrt(self.lam)
+            nncut = int(Ncut*self.fs)
+        else:
+            cutoff = 1 / cutperiod
+            nncut = int(Ncut*self.fs * np.sqrt(self.lam))
+
+        STDLF = np.zeros(self.chN)
+        STDHF = np.zeros(self.chN)
+
+        for i, ichname in enumerate(self.chInfo['Name'].values):
+            series = self.data[sseg][ichname].values
+            seriesLF = butter_lowpass_filter(series, cutoff, self.fs, 6)
+            seriesHF = butter_highpass_filter(series, cutoff, self.fs, 6)
+            seriesLF = seriesLF - np.mean(seriesLF)
+            STDLF[i] = np.std(seriesLF[nncut:-nncut])
+            STDHF[i] = np.std(seriesHF[nncut:-nncut])
+        
+        LHanaDF = self.segStatis[sseg]
+        LHanaDF.insert(2, column = 'STD (LF)', value=STDLF)
+        LHanaDF.insert(3, column = 'STD (WF)', value=STDHF)
+        if pScreen == True:
+            print('-' * 50)
+            print(LHanaDF.to_string(float_format='% .3E', justify='center'))
+            print('-' * 50)
+
+        path = os.getcwd()
+        if printTxt:
+            file_name = path + '/' + \
+                os.path.splitext(self.filename)[0] + '_statistic.txt'
+            infoFile = open(file_name, 'w')
+            infoFile.write(LHanaDF.to_string(
+                    float_format='% .3E', justify='center'))
+            infoFile.close()
+            print('Export: {0:s}'.format(file_name))
+        if printExcel:
+            file_name = path + '/' + \
+                        os.path.splitext(self.filename)[0] + '_statistic.xlsx'
+            LHanaDF.to_excel(file_name)
+            print('Export: {0:s}'.format(file_name))
