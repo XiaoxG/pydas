@@ -132,7 +132,7 @@ class CaseData:
         index = []
         duration = []
         for n in range(self.segN):
-            # type: 0 - 采样段，1 - 前标定段，2 - 后标定段
+            ## type: 0 - 采样段，1 - 前标定段，2 - 后标定段
             segType.append(segInfo[n][0])
             startTime.append('{0:02d}:{1:02d}:{2:02d}.{3:1d}'.format(
                 segInfo[n][6], segInfo[n][5], segInfo[n][4], segInfo[n][3]))
@@ -398,7 +398,7 @@ class CaseData:
             header2write = 'Time '+' '.join(
                 self.chInfo['Name']) + '\n' + 'S ' + ' '.join(self.chInfo['Unit']) + '\n'
             
-            if time == True:
+            if time:
                 N = self.data[idx].values.shape[0]
                 M = self.data[idx].values.shape[1]
                 datawrite = np.zeros((N,M+1))
@@ -409,7 +409,7 @@ class CaseData:
                     for i in range(0, N):
                         datawrite[i,0] = i/self.fs
                 datawrite[:,1:M+2] = self.data[idx].values
-                if header == True:
+                if header:
                     np.savetxt(filename,datawrite,fmt = '% .5E',delimiter=' ', header = header2write)
                 else:
                     np.savetxt(filename,datawrite,fmt = '% .5E',delimiter=' ')
@@ -417,7 +417,7 @@ class CaseData:
                 data2write = self.data[idx].to_string(header=False,
                                                         index=False, justify='left', float_format='% .5E')
                 infoFile = open(filename, 'w')
-                if header == True:
+                if header:
                     header2write = ' '.join(self.chInfo['Name']) + '\n' + ' '.join(self.chInfo['Unit']) + '\n'
                     infoFile.write(header2write)
                 infoFile.write(data2write)
@@ -436,6 +436,7 @@ class CaseData:
             warnings.warn('Input sseg is illegal. (int or defalt)')
 
     def pst(self, printTxt=False, printExcel=False):
+        self.updateST(sseg = 0)
         print('-' * 50)
         print('Segment total: {0:02d}'.format(self.segN))
         for idx, istatictis in enumerate(self.segStatis):
