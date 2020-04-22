@@ -11,12 +11,12 @@ Copyright &copy; 2018
 ## 使用方法
 *或：*
 
-1. `git clone https://github.com/JosephFang/pydas.git`至项目目录
+1. `git clone https://github.com/XiaoxG/pydas.git`至项目目录
 2. `import CaseData`
 
 *或：*
 
-1. `git clone https://github.com/JosephFang/pydas.git` 至本地目录
+1. `git clone https://github.com/XiaoxG/pydas.git` 至本地目录
 2. 在site-packages添加一个路径文件，如pydas.pth，必须以.pth为后缀，写上保存 pydas.py 的本地所在的目录名称。
 3. 在编写python脚本时，使用 `from CaseData import *`
 
@@ -47,7 +47,7 @@ FDAS主要对单个工况数据进行处理，我们希望基于python开发流�
 
 ...
 
-目前程序托管于GitHub，主页为：https://github.com/JosephFang/pydas
+目前程序托管于GitHub，主页为：https://github.com/XiaoxG/pydas
 
 目前拥有以下功能：
 
