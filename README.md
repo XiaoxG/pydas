@@ -6,6 +6,28 @@ A comprehensive data analysis system for processing and analyzing large time ser
 
 PyDAS is a powerful Python library designed for analyzing and processing time series data, with a focus on signal processing, spectral analysis, and data visualization. It provides a comprehensive set of tools for engineers and scientists working with large datasets, particularly in the field of oceanic engineering.
 
+## Project Structure
+
+```
+pydas/
+├── src/              # Main package directory
+│   ├── __init__.py   # Package initialization 
+│   ├── pydas.py      # Core functionality
+│   ├── pydas_plot.py # Plotting utilities
+│   └── waveModel/    # Wave modeling subpackage
+│       ├── __init__.py
+│       ├── core.py
+│       ├── specdata.py
+│       ├── specmodels.py
+│       └── ...
+├── examples/         # Example scripts
+├── tests/            # Test suite
+├── docs/             # Documentation
+├── setup.py          # Installation script
+├── requirements.txt  # Dependencies
+└── README.md         # This file
+```
+
 ## Features
 
 - **Data Processing & Analysis**
@@ -36,15 +58,32 @@ PyDAS is a powerful Python library designed for analyzing and processing time se
 
 ## Installation
 
-```bash
-# Install from PyPI
-pip install pydas
+### From Source
 
-# Or install from source
+```bash
+# Clone the repository
 git clone https://gitee.com/xiaoxianguo/pydas.git
 cd pydas
+
+# Install in development mode
 pip install -e .
+
+# Install with development dependencies
+pip install -e ".[dev]"
 ```
+
+### Requirements
+
+PyDAS depends on the following packages:
+- numpy (≥1.19.0)
+- pandas (≥1.1.0)
+- scipy (≥1.5.0)
+- matplotlib (≥3.3.0)
+- plotly (≥5.0.0)
+- numba (≥0.50.0)
+- dask (≥2021.6.0)
+- kaleido (≥0.2.0)
+- scikit-learn (≥0.24.0)
 
 ## Quick Start
 
@@ -153,6 +192,38 @@ wave_data.to_dat("processed_data.dat")
 wave_data.to_csv("processed_data.csv")
 ```
 
+### Using waveModel Directly
+
+The `waveModel` subpackage can be imported directly for spectral modeling and wave analysis:
+
+```python
+# Import the wave modeling subpackage
+import pydas.waveModel as wm
+
+# Create a JONSWAP spectrum
+freq = np.linspace(0.05, 2, 100)  # Frequency array in Hz
+Hs = 4.0  # Significant wave height in meters
+Tp = 10.0  # Peak period in seconds
+gamma = 3.3  # Peakedness parameter
+
+# Generate spectrum
+S = wm.jonswap(freq, Hs, Tp, gamma)
+
+# Calculate spectral moments
+m0 = wm.moment(freq, S, 0)  # Zeroth moment
+m1 = wm.moment(freq, S, 1)  # First moment
+m2 = wm.moment(freq, S, 2)  # Second moment
+
+# Calculate wave parameters
+Hm0 = 4.0 * np.sqrt(m0)  # Significant wave height
+Tm01 = m0/m1  # Mean period
+Tm02 = np.sqrt(m0/m2)  # Zero-crossing period
+
+print(f"Significant wave height: {Hm0:.2f} m")
+print(f"Mean period: {Tm01:.2f} s")
+print(f"Zero-crossing period: {Tm02:.2f} s")
+```
+
 ### Full-Scale Analysis
 
 ```python
@@ -178,6 +249,48 @@ Hm0_model = 4.0 * np.sqrt(float(spec_model.moment(0)))
 Hm0_full = 4.0 * np.sqrt(float(spec_full.moment(0)))
 print(f"Model scale Hm0: {Hm0_model:.4f} m")
 print(f"Full scale Hm0: {Hm0_full:.4f} m")
+```
+
+## Development
+
+### Setting Up a Development Environment
+
+```bash
+# Clone the repository
+git clone https://gitee.com/xiaoxianguo/pydas.git
+cd pydas
+
+# Create and activate a virtual environment (optional but recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install in development mode with all extra dependencies
+pip install -e ".[dev]"
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_specific.py
+
+# Run with coverage report
+pytest --cov=pydas
+```
+
+### Code Style
+
+PyDAS follows PEP 8 style guidelines. You can check your code with:
+
+```bash
+# Check code style
+flake8 src tests
+
+# Auto-format code
+black src tests
 ```
 
 ## API Reference
@@ -226,25 +339,26 @@ print(f"Full scale Hm0: {Hm0_full:.4f} m")
 | `updateST()` | Update statistical information for all channels |
 | `updateChN()` | Update channel count information |
 
-## Dependencies
+## Contributing
 
-- numpy (≥1.19.0)
-- pandas (≥1.1.0)
-- scipy (≥1.5.0)
-- matplotlib (≥3.3.0)
-- plotly (≥5.0.0)
-- numba (≥0.50.0)
-- dask (≥2021.6.0)
-- kaleido (≥0.2.0)
-- scikit-learn (≥0.24.0)
+Contributions to PyDAS are welcome! Here's how you can contribute:
+
+1. **Fork the Repository**: Create your own fork of the project
+2. **Create a Branch**: Make your changes in a new branch
+3. **Write Tests**: Add tests for new features or bug fixes
+4. **Follow Style Guidelines**: Ensure your code follows PEP 8
+5. **Submit a Pull Request**: Open a PR to merge your changes
+
+### Contribution Guidelines
+
+- Keep the code well-documented
+- Maintain backward compatibility when possible
+- Write unit tests for new features
+- Update documentation to reflect changes
 
 ## License
 
 MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Citation
 
@@ -258,4 +372,52 @@ If you use PyDAS in your research, please cite:
   version = {1.0.2},
   year = {2024},
 }
-``` 
+```
+
+## 中文说明
+
+PyDAS是一个用于分析和处理大型时间序列数据的Python库，专注于信号处理、谱分析和数据可视化。它为工程师和科学家提供了一套全面的工具，特别适用于海洋工程领域的大型数据集处理。
+
+### 主要功能
+
+- **数据处理与分析**：支持多种数据格式，提供高级过滤、统计分析和数据清洗功能
+- **可视化**：交互式时间序列图、谱分析、直方图和XY散点图
+- **性能优化**：使用Numba JIT编译和向量化操作，自动下采样大型数据集
+- **科学计算**：谱密度估计、谱矩计算、通道间互相关和信号导数
+
+### 安装方法
+
+```bash
+# 从PyPI安装
+pip install pydas
+
+# 或从源代码安装
+git clone https://gitee.com/xiaoxianguo/pydas.git
+cd pydas
+pip install -e .
+```
+
+### 快速入门
+
+```python
+from pydas import PyDAS
+
+# 加载数据文件
+data = PyDAS(filename="your_data_file.csv")
+
+# 绘制通道数据
+data.plot_channel("channel1", use_plotly=True)
+
+# 应用滤波器
+data.apply_lowpass_filter("channel1", cutoff=2.0)
+
+# 执行谱分析
+spec, fig = data.spectral_analysis(
+    channel_name="channel1",
+    method="cov",
+    L=1024,
+    use_plotly=True
+)
+```
+
+有关更详细的说明和示例，请参阅上面的英文文档部分。 

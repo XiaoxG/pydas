@@ -18,7 +18,8 @@ setup(
     url="https://gitee.com/xiaoxianguo/pydas",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    packages=find_packages(),
+    package_dir={"": "src"},
+    packages=find_packages(where="src"),
     keywords=["data analysis", "time series", "signal processing", "oceanic engineering", "spectral analysis"],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
@@ -54,7 +55,8 @@ setup(
         ],
     },
     package_data={
-        "pydas_viz": ["*.py"],
+        "": ["*.py"],
+        "waveModel": ["*.py"],
     },
     project_urls={
         "Bug Tracker": "https://gitee.com/xiaoxianguo/pydas/issues",
