@@ -97,7 +97,7 @@ Dependencies:
 - scipy: Scientific computing
 - matplotlib: Static visualization and fallback rendering
 
-Author: Xiaox Guo
+Author: Xiaoxian Guo
 Date: 2024-03-20
 Version: 1.0.1
 """
@@ -114,6 +114,7 @@ from scipy import interpolate
 from scipy.spatial.transform import Rotation as R
 import logging
 import warnings
+from waveModel.timeseries import TimeSeries
 # Import numba for acceleration
 try:
     from numba import jit, float64, int32, void, prange
@@ -3541,503 +3542,149 @@ class PyDAS:
         except Exception as e:
             logger.error(f"Error in plot_xy: {str(e)}")
             raise
-
-    def spectral_analysis(self, channel_name, method='cov', L=1024, filtered=False, 
-                      cutoff_freq=None, plot=True, title=None, xlim=None, ylim=None, 
-                      figsize=(10, 6), show=True, save_path=None, dpi=300, 
-                      use_plotly=True, save_html=None, width=None, height=None,
-                      subplot_layout=None, return_data=False, fullscale=False,
-                      fullscale_rho=1.025, fullscale_g=9.807):
+    
+    def _validate_channel(self, ch_idx):
         """
-        Perform spectral analysis on a channel using WAFO toolkit.
+        Validate channel index and return the normalized index.
         
         Parameters:
         -----------
-        channel_name : str or list
-            Name of the channel to analyze or list of channel names
-        method : str, optional
-            Spectral analysis method ('cov' or 'psd'), default is 'cov'
-        L : int, optional
-            Window size for spectral analysis, default is 1024
-        filtered : bool, optional
-            Whether to apply low-pass filtering before analysis, default is False
-        cutoff_freq : float, optional
-            Cutoff frequency for low-pass filter (if filtered=True), default is None
-        plot : bool, optional
-            Whether to generate a plot, default is True
-        title : str or list, optional
-            Title for plot (string or list for multiple channels), default is None
-        xlim : tuple or list, optional
-            X-axis limits (tuple or list of tuples), default is None
-        ylim : tuple or list, optional
-            Y-axis limits (tuple or list of tuples), default is None
-        figsize : tuple, optional
-            Figure size for Matplotlib, default is (10, 6)
-        show : bool, optional
-            Whether to display the plot, default is True
-        save_path : str or list, optional
-            Path to save plot (string or list for multiple channels), default is None
-        dpi : int, optional
-            DPI for saved plot, default is 300
-        use_plotly : bool, optional
-            Use Plotly for interactive plotting, default is True
-        save_html : str or list, optional
-            Path to save interactive HTML plot, default is None
-        width : int, optional
-            Width of plot in pixels (Plotly only), default is None
-        height : int, optional
-            Height of plot in pixels (Plotly only), default is None
-        subplot_layout : tuple, optional
-            Custom layout for multiple channel plots (rows, cols), default is None
-        return_data : bool, optional
-            Whether to return the spectral data, default is False
-        fullscale : bool, optional
-            Whether to convert data to full scale before analysis, default is False
-        fullscale_rho : float, optional
-            Water density in kg/m³ for full scale conversion, default is 1.025
-        fullscale_g : float, optional
-            Gravitational acceleration in m/s² for full scale conversion, default is 9.807
+        ch_idx : int or str
+            Channel index or name
             
         Returns:
         --------
-        dict or None
-            If return_data is True, returns a dictionary mapping channel names to 
-            spectral data objects. If return_data is False, returns None.
-            
-        Notes:
-        ------
-        - The spectral analysis is performed using the WAFO toolkit
-        - The plot shows spectral density vs. angular frequency (rad/s)
-        - Multiple channels can be analyzed in one call
-        - For multi-channel analysis, results can be shown in separate plots or subplots
-        - If fullscale=True, data is temporarily converted to full scale using Froude scaling
-          before analysis, which affects the spectral amplitudes and frequencies
+        int
+            Normalized channel index
         """
-        
-        # Check if waveModel is available
-        try:
-            import waveModel.timeseries as wm
-        except ImportError:
-            logger.error("waveModel not installed. Install it using 'pip install waveModel'.")
-            return None
-        
-        # Import needed modules for plotting
-        import os
-        import numpy as np
-        import matplotlib.pyplot as plt
-        
-        # Default segment
-        sseg = 0
-        
-        # Convert single channel to list
-        if isinstance(channel_name, str) or isinstance(channel_name, int):
-            ch_names = [channel_name]
-        else:
-            ch_names = channel_name
-            
-        # Validate channel names
-        valid_ch_names = []
-        for ch in ch_names:
-            result = self._validate_channel(ch)
-            if result is not None:
-                # 如果_validate_channel返回的是字符串（通道名称），直接使用
-                if isinstance(result, str):
-                    valid_ch_names.append(result)
-                # 如果返回的是整数（通道索引），使用iloc获取名称
-                elif isinstance(result, int):
-                    valid_ch_names.append(self.chInfo['Name'].iloc[result])
-                else:
-                    logger.warning(f"Unexpected result type from _validate_channel: {type(result)}")
-            else:
-                logger.warning(f"Channel '{ch}' not found, skipping.")
-        
-        if not valid_ch_names:
-            logger.error("No valid channels found for spectral analysis.")
-            return None
-        
-        # Set up subplot layout if analyzing multiple channels
-        num_channels = len(valid_ch_names)
-        
-        # Set up plotting environment for subplots if needed
-        if subplot_layout is not None and num_channels > 1 and plot:
-            if use_plotly:
-                try:
-                    import plotly.graph_objects as go
-                    from plotly.subplots import make_subplots
-                    
-                    rows, cols = subplot_layout
-                    fig = make_subplots(
-                        rows=rows, 
-                        cols=cols,
-                        subplot_titles=[f"Spectrum of {ch}" for ch in valid_ch_names]
-                    )
-                    fig.update_layout(
-                        title="Spectral Analysis",
-                        width=width or 1200,
-                        height=height or 800
-                    )
-                except ImportError:
-                    logger.error("Plotly not installed. Install it using 'pip install plotly'.")
-                    use_plotly = False
-                    
-            else:
-                # Set up matplotlib figure
-                fig, axs = plt.subplots(
-                    *subplot_layout, 
-                    figsize=figsize, 
-                    sharex=True
-                )
-                plt.tight_layout(pad=3.0)
-        
-        # Prepare title, xlim, ylim for multiple channels
-        if num_channels > 1:
-            if title is None:
-                titles = [None] * num_channels
-            elif isinstance(title, list):
-                titles = title + [None] * (num_channels - len(title))
-            else:
-                titles = [f"{title} - {ch}" for ch in valid_ch_names]
-                
-            if xlim is None:
-                xlims = [None] * num_channels
-            elif isinstance(xlim, list) and all(isinstance(x, tuple) for x in xlim):
-                xlims = xlim + [None] * (num_channels - len(xlim))
-            else:
-                xlims = [xlim] * num_channels
-                
-            if ylim is None:
-                ylims = [None] * num_channels
-            elif isinstance(ylim, list) and all(isinstance(y, tuple) for y in ylim):
-                ylims = ylim + [None] * (num_channels - len(ylim))
-            else:
-                ylims = [ylim] * num_channels
-        else:
-            titles = [title]
-            xlims = [xlim]
-            ylims = [ylim]
-            
-        # Process each channel
-        results = {}
-        for i, ch_name in enumerate(valid_ch_names):
-            try:
-                # Check if channel exists
-                ch_idx = self._validate_channel(ch_name)
-                if ch_idx is None:
-                    continue
-                    
-                # Create a temporary copy of the data
-                orig_data = self.data[sseg][ch_name].values.copy()
-                orig_unit = self.chInfo.loc[self.chInfo['Name'] == ch_name, 'Unit'].values[0]
-                data = orig_data.copy()
-                
-                # Apply full scale conversion if requested
-                if fullscale:
-                    try:
-                        # 使用默认的缩放因子
-                        lam = self.__lam__
-                        
-                        # Get unit for scaling
-                        unit = self.chInfo.loc[self.chInfo['Name'] == ch_name, 'Unit'].values[0]
-                        
-                        # Apply Froude scaling based on unit
-                        # Length scale: λ
-                        # Time scale: √λ
-                        # Force scale: λ³
-                        # Acceleration scale: 1
-                        
-                        # Basic scaling based on unit
-                        if unit in ['m', 'cm', 'mm']:
-                            # Length units
-                            scale_factor = lam
-                            if unit == 'cm':
-                                # Convert from cm to m first
-                                data = data * 0.01 * scale_factor
-                            elif unit == 'mm':
-                                # Convert from mm to m first
-                                data = data * 0.001 * scale_factor
-                            else:
-                                # Already in meters
-                                data = data * scale_factor
-                            scaled_unit = 'm'
-                        elif unit in ['kN', 'N']:
-                            # Force units
-                            scale_factor = lam**3
-                            if unit == 'N':
-                                # Convert to kN
-                                data = data * 0.001 * scale_factor
-                            else:
-                                data = data * scale_factor
-                            scaled_unit = 'kN'
-                        elif unit in ['kg']:
-                            # Mass units (convert to force)
-                            scale_factor = lam**3
-                            data = data * scale_factor * fullscale_g * 0.001  # Convert to kN
-                            scaled_unit = 'kN'
-                        else:
-                            # For unknown units, use generic scaling
-                            logger.warning(f"Unknown unit '{unit}' for scaling. Using default factor {lam}.")
-                            data = data * lam
-                            scaled_unit = unit
-                            
-                        logger.info(f"Scaled channel '{ch_name}' from {unit} to {scaled_unit} with factor {lam}")
-                    except Exception as e:
-                        logger.error(f"Error scaling channel {ch_name}: {str(e)}")
-                        logger.info("Using original data for analysis")
-                        data = orig_data
-                
-                # Apply filtering if requested
-                if filtered and cutoff_freq is not None:
-                    filtered_data = self.apply_lowpass_filter(
-                        ch_name, 
-                        cutoffull=cutoff_freq, 
-                        replace=False, 
-                        returnValue=True, 
-                        sseg=sseg
-                    )
-                    
-                    if filtered_data is not None:
-                        data = filtered_data
-                
-                # Check if data exists and is not empty
-                if data is None or len(data) == 0:
-                    logger.error(f"No data found for channel {ch_name}")
-                    continue
-                
-                # Create TimeSeries object
-                try:
-                    # 创建对应的时间向量
-                    fs = self.__fs__
-                    
-                    # 如果是全尺度，则根据Froude相似律调整频率
-                    if fullscale:
-                        # 时间尺度为√λ
-                        fs = fs / np.sqrt(self.__lam__)
-                        logger.info(f"Adjusted sampling frequency from {self.__fs__}Hz to {fs}Hz for full scale")
-                    
-                    time_vector = np.arange(0, len(data) / fs, 1 / fs)
-                    
-                    # 确保时间向量长度与数据相同
-                    if len(time_vector) > len(data):
-                        time_vector = time_vector[:len(data)]
-                    elif len(time_vector) < len(data):
-                        # 扩展时间向量以匹配数据长度
-                        last_time = time_vector[-1] if len(time_vector) > 0 else 0
-                        time_step = 1 / fs
-                        additional_points = len(data) - len(time_vector)
-                        extension = np.arange(1, additional_points + 1) * time_step + last_time
-                        time_vector = np.concatenate([time_vector, extension])
-                    
-                    ts = wm.TimeSeries(data, time_vector)
-                    
-                    # Perform spectral analysis
-                    spec = None
-                    if method.lower() == 'psd':
-                        # 使用welch方法计算PSD，然后转换为谱数据
-                        from scipy.signal import welch
-                        # 使用更新后的采样频率fs进行计算，这样如果是全尺度分析，频率已经被调整过
-                        f, Pxx = welch(data, fs=fs, nperseg=L)
-                        # 创建一个类似于tocovdata返回的对象
-                        from waveModel.specdata import SpecData1D
-                        # 直接使用角频率，不转换为Hz
-                        spec = SpecData1D(Pxx, f * 2 * np.pi)  # rad/s
-                    else:  # default to cov
-                        # 使用tocovdata方法计算协方差，然后转换为谱数据
-                        # 注意：时间向量已经根据是否为全尺度分析调整了
-                        cov_data = ts.tocovdata(lag=L)
-                        spec = cov_data.tospecdata()
-                    
-                    # Store spectrum data
-                    results[ch_name] = spec
-                except Exception as e:
-                    logger.error(f"Error creating spectrum for channel {ch_name}: {str(e)}")
-                    continue
-                
-                # Only generate plot if requested and not just returning data
-                if plot:
-                    # Create individual plots if not combined in a figure
-                    if subplot_layout is None or num_channels == 1:
-                        # Set parameters for this channel
-                        ch_title = titles[i] if titles and i < len(titles) else None
-                        ch_xlim = xlims[i] if xlims and i < len(xlims) else None
-                        ch_ylim = ylims[i] if ylims and i < len(ylims) else None
-                        ch_save_path = None
-                        ch_save_html = None
-                        
-                        if save_path is not None:
-                            if isinstance(save_path, list) and i < len(save_path):
-                                ch_save_path = save_path[i]
-                            elif isinstance(save_path, str):
-                                # Append channel name before extension for multiple channels
-                                if num_channels > 1:
-                                    base, ext = os.path.splitext(save_path)
-                                    ch_save_path = f"{base}_{ch_name}{ext}"
-                                else:
-                                    ch_save_path = save_path
-                        
-                        if save_html is not None:
-                            if isinstance(save_html, list) and i < len(save_html):
-                                ch_save_html = save_html[i]
-                            elif isinstance(save_html, str):
-                                # Append channel name before extension for multiple channels
-                                if num_channels > 1:
-                                    base, ext = os.path.splitext(save_html)
-                                    ch_save_html = f"{base}_{ch_name}{ext}"
-                                else:
-                                    ch_save_html = save_html
-                        
-                        # Create the plot
-                        fig = self._plot_spectrum(
-                            spec,
-                            ch_name,
-                            title=ch_title,
-                            xlim=ch_xlim,
-                            ylim=ch_ylim,
-                            figsize=figsize,
-                            show=show and not (subplot_layout is not None and num_channels > 1),
-                            save_path=ch_save_path,
-                            dpi=dpi,
-                            use_plotly=use_plotly,
-                            save_html=ch_save_html,
-                            width=width,
-                            height=height,
-                            fullscale=fullscale
-                        )
-                    else:
-                        # For combined plots, just create subplot
-                        try:
-                            row = i // subplot_layout[1] + 1
-                            col = i % subplot_layout[1] + 1
-                            
-                            if use_plotly:
-                                # Add to subplots
-                                if hasattr(spec, 'args'):
-                                    if isinstance(spec.args, tuple) and len(spec.args) > 0:
-                                        # 使用角频率，不除以2*pi转换为Hz
-                                        f = spec.args[0]  # rad/s
-                                    else:
-                                        # 使用角频率，不除以2*pi转换为Hz
-                                        f = spec.args  # rad/s
-                                else:
-                                    raise ValueError("Could not find frequency data")
-                                    
-                                if hasattr(spec, 'data'):
-                                    S = spec.data  # Spectral density from data attribute
-                                elif hasattr(spec, 'S'):
-                                    S = spec.S  # Spectral density from S attribute
-                                else:
-                                    raise ValueError("Could not find spectral density data")
-                                    
-                                # Ensure f and S have matching dimensions
-                                if f.ndim > 1:
-                                    f = f.flatten()
-                                    warnings.warn("Flattened frequency array of dimension > 1")
-                                if S.ndim > 1:
-                                    S = S.flatten()
-                                    warnings.warn("Flattened spectral density array of dimension > 1")
-                                
-                                if len(f) != len(S):
-                                    min_len = min(len(f), len(S))
-                                    f = f[:min_len]
-                                    S = S[:min_len]
-                                    
-                                # Get ch_title
-                                ch_title = titles[i] if titles and i < len(titles) else f"Spectrum of {ch_name}"
-                                
-                                # Add to subplot
-                                fig.add_trace(
-                                    go.Scatter(
-                                        x=f,
-                                        y=S,
-                                        mode='lines',
-                                        line=dict(color='blue', width=2),
-                                        name=ch_name
-                                    ),
-                                    row=row,
-                                    col=col
-                                )
-                                
-                                # Update axes
-                                fig.update_xaxes(title_text="Angular Frequency (rad/s)", row=row, col=col)
-                                fig.update_yaxes(title_text="Spectral Density", row=row, col=col)
-                                fig.update_xaxes(title_text=ch_title, row=row, col=col)
-                                
-                                # Set axis limits if provided
-                                if xlims and i < len(xlims) and xlims[i]:
-                                    fig.update_xaxes(range=xlims[i], row=row, col=col)
-                                if ylims and i < len(ylims) and ylims[i]:
-                                    fig.update_yaxes(range=ylims[i], row=row, col=col)
-                            else:
-                                # Matplotlib subplots
-                                ax = axs[row-1, col-1] if subplot_layout[0] > 1 and subplot_layout[1] > 1 else axs[max(row-1, col-1)]
-                                
-                                # Get frequency and spectral density
-                                if hasattr(spec, 'args'):
-                                    if isinstance(spec.args, tuple) and len(spec.args) > 0:
-                                        # 使用角频率，不除以2*pi转换为Hz
-                                        f = spec.args[0]  # rad/s
-                                    else:
-                                        # 使用角频率，不除以2*pi转换为Hz
-                                        f = spec.args  # rad/s
-                                
-                                if hasattr(spec, 'data'):
-                                    S = spec.data
-                                elif hasattr(spec, 'S'):
-                                    S = spec.S
-                                    
-                                # Get ch_title
-                                ch_title = titles[i] if titles and i < len(titles) else f"Spectrum of {ch_name}"
-                                
-                                # Plot spectrum
-                                ax.plot(f, S, 'b-', linewidth=2)
-                                ax.set_xlabel('Angular Frequency (rad/s)')
-                                ax.set_ylabel('Spectral Density')
-                                ax.set_title(ch_title)
-                                ax.grid(True, linestyle='--', alpha=0.7)
-                                
-                                # Set axis limits if provided
-                                if xlims and i < len(xlims) and xlims[i]:
-                                    ax.set_xlim(xlims[i])
-                                if ylims and i < len(ylims) and ylims[i]:
-                                    ax.set_ylim(ylims[i])
-                            
-                        except Exception as e:
-                            logger.error(f"Error adding {use_plotly and 'Plotly' or 'Matplotlib'} subplot for {ch_name}: {str(e)}")
-            except Exception as e:
-                logger.error(f"Error processing channel {ch_name}: {str(e)}")
-        
-        # Show combined plot if we're using subplots
-        if plot and subplot_layout is not None and num_channels > 1:
-            if use_plotly:
-                if save_html:
-                    fig.write_html(save_html)
-                if show:
-                    fig.show()
-            else:
-                if save_path:
-                    plt.savefig(save_path, dpi=dpi)
-                if show:
-                    plt.show()
-                    
-        # Return the results dictionary or None based on return_data parameter
-        return results if return_data else None
-
-    def _validate_channel(self, ch_idx):
-        """Helper method to validate and get channel name from index or name."""
-        if isinstance(ch_idx, int):
-            if ch_idx < len(self.chInfo):
-                return self.chInfo.iloc[ch_idx]['Name']
-            else:
-                logger.error(f"Channel index {ch_idx} out of bounds.")
-                return None
-        elif isinstance(ch_idx, str):
+        if isinstance(ch_idx, str):
             if ch_idx in self.chInfo['Name'].values:
+                return self.chInfo[self.chInfo['Name'] == ch_idx].index[0]
+            else:
+                logger.error(f"Channel name '{ch_idx}' not found.")
+                return -1
+        elif isinstance(ch_idx, (int, np.integer)):
+            if 0 <= ch_idx < self.__chN__:
                 return ch_idx
             else:
-                logger.error(f"Channel '{ch_idx}' not found.")
-                return None
+                logger.error(f"Channel index {ch_idx} out of range [0, {self.__chN__-1}].")
+                return -1
         else:
-            logger.error("Channel identifier must be an integer or string.")
-            return None
+            logger.error(f"Invalid channel identifier type: {type(ch_idx)}")
+            return -1
+            
+    def _get_default_transDict(self, g=9.807):
+        """
+        获取默认的单位转换字典
+        
+        Parameters:
+        -----------
+        g : float, optional
+            重力加速度，默认值为9.807 m/s²
+            
+        Returns:
+        --------
+        dict
+            单位转换字典，包含常用单位的转换规则
+        """
+        return {
+            'kg': ['kN', np.array([g * 0.001, 1.0, 3.0])],
+            'cm': ['m', np.array([0.01, 0.0, 1.0])],
+            'mm': ['m', np.array([0.001, 0.0, 1.0])],
+            'm': ['m', np.array([1, 0.0, 1.0])],
+            's': ['s', np.array([1, 0.0, 0.5])],
+            'deg': ['deg', np.array([1, 0.0, 0.0])],
+            'rad': ['rad', np.array([1, 0.0, 0.0])],
+            'n': ['kn', np.array([0.001, 1.0, 3.0])],
+            'kn': ['kn', np.array([1, 0.0, 0.0])],
+            '%': ['%', np.array([1, 0.0, 0.0])],
+            '-': ['-', np.array([1, 0.0, 0.0])]
+        }
+
+    def _findtrans(self, unit, transDict=None, trans_cache=None):
+        """
+        查找单位的转换参数
+        
+        Parameters:
+        -----------
+        unit : str
+            需要转换的单位
+        transDict : dict, optional
+            单位转换字典，如果为None，使用默认字典
+        trans_cache : dict, optional
+            用于存储已计算过的转换结果的缓存
+            
+        Returns:
+        --------
+        list
+            [new_unit, coefficients]，其中coefficients是[coeff_unit, coeff_rho, coeff_lambda]
+        """
+        if transDict is None:
+            transDict = self._get_default_transDict()
+            
+        # 初始化缓存
+        if trans_cache is None:
+            trans_cache = {}
+            
+        # 检查结果是否已在缓存中
+        unit = unit.lower().strip()
+        if unit in trans_cache:
+            return trans_cache[unit]
+        
+        if unit in transDict:
+            trans = transDict[unit]
+            trans_cache[unit] = trans
+            return trans
+        elif '/' in unit:
+            unitUpper, unitLower = unit.split('/')
+            transUpper = self._findtrans(unitUpper, transDict, trans_cache)
+            transLower = self._findtrans(unitLower, transDict, trans_cache)
+            trans = [transUpper[0] + '/' +
+                     transLower[0], np.array([0.0, 0.0, 0.0])]
+            trans[1][0] = transUpper[1][0] / transLower[1][0]
+            trans[1][1] = transUpper[1][1] - transLower[1][1]
+            trans[1][2] = transUpper[1][2] - transLower[1][2]
+            trans_cache[unit] = trans
+            return trans
+        elif '.' in unit:
+            unitWithDot = unit.split('.')
+            transU = []
+            transN1 = np.array([])
+            transN2 = np.array([])
+            transN3 = np.array([])
+            for uWithDot in unitWithDot:
+                transWithDot = self._findtrans(uWithDot, transDict, trans_cache)
+                transU.append(transWithDot[0])
+                transN1 = np.append(transN1, transWithDot[1][0])
+                transN2 = np.append(transN2, transWithDot[1][1])
+                transN3 = np.append(transN3, transWithDot[1][2])
+            trans = ['.'.join(transU), np.array([1.0, 0.0, 0.0])]
+            for x in np.nditer(transN1):
+                trans[1][0] *= x
+            trans[1][1] = transN2.sum()
+            trans[1][2] = transN3.sum()
+            trans_cache[unit] = trans
+            return trans
+        elif unit[-1].isdigit():
+            n = int(unit[-1])
+            unit_base = unit[0:-1]
+            if unit_base in transDict:
+                trans_temp = transDict[unit_base]
+                trans = [trans_temp[0] +
+                         str(n), np.array([1.0, 0.0, 0.0])]
+                trans[1][0] = trans_temp[1][0]**n
+                trans[1][1] = trans_temp[1][1] * n
+                trans[1][2] = trans_temp[1][2] * n
+                trans_cache[unit] = trans
+                return trans
+            else:
+                logger.warning(
+                    f"Input unit '{unit}' cannot be identified, using default values.")
+                return [unit, np.array([1.0, 0.0, 0.0])]
+        else:
+            logger.warning(
+                f"Input unit '{unit}' cannot be identified, using default values.")
+            return [unit, np.array([1.0, 0.0, 0.0])]
             
     def _plot_spectrum(self, spec, channel_name, title=None, xlim=None, ylim=None, 
                       figsize=(10, 6), show=True, save_path=None, dpi=300,
@@ -4307,3 +3954,300 @@ class PyDAS:
         except Exception as e:
             logger.error(f"Error plotting spectrum: {str(e)}")
             return None
+
+    def channel2fullscale(self, channel_name, lam, rho=1.025, g=9.807):
+        """
+        Convert a single channel from model scale to prototype scale and return timeseries.
+        
+        Parameters:
+        -----------
+        channel_name : str
+            Name of the channel to convert
+        lam : float
+            Scale factor
+        rho : float, optional
+            Water density in kg/m³, default is 1.025
+        g : float, optional
+            Gravitational acceleration in m/s², default is 9.807
+            
+        Returns:
+        --------
+        ts : waveModel.TimeSeries
+            TimeSeries object containing the converted data with time in seconds
+        
+        Notes:
+        ------
+        - Applies Froude scaling laws without modifying the original data
+        - Uses the same conversion logic as to_fullscale method
+        - Returns a TimeSeries object from waveModel module
+        """
+
+        # Validate channel exists
+        if channel_name not in self.chInfo['Name'].values:
+            logger.error(f"Channel {channel_name} not found")
+            return None
+            
+        # Get channel index
+        ch_idx = self.chInfo[self.chInfo['Name'] == channel_name].index[0]
+        
+        # Get channel unit
+        unit = self.chInfo.loc[ch_idx, 'Unit']
+        
+        # Define unit conversion dictionary (same as in to_fullscale)
+        transDict = self._get_default_transDict(g)
+        
+        # Get conversion factors
+        trans_temp = self._findtrans(unit, transDict)
+        C1 = trans_temp[1][0]  # CoeffUnit
+        C2 = rho ** trans_temp[1][1]  # CoeffRho
+        C3 = lam ** trans_temp[1][2]  # CoeffLam
+        coeff = C1 * C2 * C3
+        
+        # Calculate time array based on the scaling
+        fs_scaled = self.__fs__ / np.sqrt(lam)
+        
+        # 只处理第一段数据（如果用户需要多段，可以拓展此功能）
+        idx1 = 0
+        if self.__segN__ > 1:
+            logger.info(f"Multiple segments found. Only converting first segment.")
+            
+        # Extract original data
+        data = self.data[idx1][channel_name].copy()
+        
+        # Apply conversion coefficient
+        data_scaled = data * coeff
+        
+        # Create time array
+        T = np.arange(0, len(data)) / fs_scaled
+        
+        # 创建TimeSeries对象
+        # TimeSeries构造函数需要data和args参数，其中args是时间向量
+        ts = TimeSeries(data_scaled, T, 
+                       title=f"Full scale {channel_name}",
+                       xlab="Time (s)", 
+                       ylab=f"{channel_name} [{trans_temp[0]}]")
+        
+        return ts
+
+    def spectral_analysis(self, channel_name, method='cov', L=1024, plot=False, title=None,
+                             show=True, save_path=None, use_plotly=True, save_html=None,
+                             fullscale=False, lam=None, rho=1.025, g=9.807, freq_range=(0, 2)):
+        """
+        Perform spectral analysis on a single channel and return a spectral data object
+        
+        Parameters:
+        -----------
+        channel_name : str
+            Name of the channel to analyze
+        method : str, optional
+            Spectral analysis method ('cov' or 'psd'), default is 'cov'
+        L : int, optional
+            Window size for spectral analysis, default is 1024
+        plot : bool, optional
+            Whether to generate a plot, default is False
+        title : str, optional
+            Title for the plot, default is None
+        show : bool, optional
+            Whether to display the plot, default is True
+        save_path : str, optional
+            Path to save the plot, default is None
+        use_plotly : bool, optional
+            Use Plotly for interactive plotting, default is True
+        save_html : str, optional
+            Path to save interactive HTML plot, default is None
+        fullscale : bool, optional
+            Whether to convert data to full scale before analysis, default is False
+        lam : float, optional
+            Scale factor, used only when fullscale=True, default uses object's __lam__ attribute
+        rho : float, optional
+            Water density (kg/m³), default is 1.025
+        g : float, optional
+            Gravitational acceleration (m/s²), default is 9.807
+        freq_range : tuple, optional
+            Frequency range in full scale (rad/s), default is (0, 2)
+            
+        Returns:
+        --------
+        spec : waveModel.SpecData1D
+            Spectral data object
+            
+        Notes:
+        ------
+        - Spectral analysis is performed using the waveModel toolkit
+        - The spectrum shows spectral density vs. angular frequency (rad/s)
+        - The returned object can be used for further analysis or custom plotting
+        - When fullscale=True, data is converted to full scale using channel2fullscale method before analysis
+        - freq_range specifies the valid frequency range in full scale, which is automatically converted for model scale
+        """
+        # Check if channel exists
+        if channel_name not in self.chInfo['Name'].values:
+            logger.error(f"Channel '{channel_name}' does not exist")
+            return None
+            
+        # Ensure valid scale factor
+        if lam is None:
+            if hasattr(self, '__lam__'):
+                lam = self.__lam__
+            else:
+                if fullscale:
+                    logger.error("No scale factor lam provided and object has no default __lam__ attribute")
+                    return None
+                else:
+                    # If no full scale conversion needed, set a default value for frequency range calculation
+                    lam = 1
+                    
+        # Calculate corresponding frequency range
+        # In Froude scaling, frequency scale is sqrt(λ)
+        if fullscale:
+            # Full scale uses the directly specified range
+            w_range = freq_range
+        else:
+            # Model scale, convert frequency range
+            # f_model = f_full * sqrt(λ)
+            w_range = (freq_range[0] * np.sqrt(lam), freq_range[1] * np.sqrt(lam))
+            logger.info(f"Model scale frequency range conversion: {freq_range} rad/s -> {w_range} rad/s")
+            
+        # If full scale conversion is requested
+        if fullscale:                    
+            try:
+                # Get full scale TimeSeries using channel2fullscale
+                ts = self.channel2fullscale(channel_name, lam, rho, g)
+                if ts is None:
+                    logger.error(f"Full scale conversion failed for channel: {channel_name}")
+                    return None
+                    
+                # Calculate spectrum
+                spec = ts.tospecdata(L=L, method=method)
+            except Exception as e:
+                logger.error(f"Full scale spectral analysis failed: {str(e)}")
+                return None
+        else:
+            # Default using the first data segment
+            sseg = 0
+            
+            # Get channel data
+            data = self.data[sseg][channel_name].values.copy()
+            
+            # Create time vector (assuming equal sampling intervals)
+            fs = self.__fs__
+            t = np.arange(0, len(data)) / fs
+            
+            # Create TimeSeries object
+            try:
+                unit = self.chInfo.loc[self.chInfo['Name'] == channel_name, 'Unit'].values[0]
+                ts = TimeSeries(data, t, 
+                               title=f"Channel {channel_name}",
+                               xlab="Time (s)", 
+                               ylab=f"{channel_name} [{unit}]")
+                
+                # Calculate spectrum
+                spec = ts.tospecdata(L=L, method=method)
+            except Exception as e:
+                logger.error(f"Spectral analysis failed: {str(e)}")
+                return None
+        
+        # Apply frequency range limitation
+        try:
+            # Get frequencies and corresponding spectral density
+            freqs = spec.args
+            density = spec.data
+            
+            # Find indices within specified range
+            idx = np.logical_and(freqs >= w_range[0], freqs <= w_range[1])
+            
+            # If no data points found, warn but continue
+            if not np.any(idx):
+                logger.warning(f"No data points within specified frequency range {w_range} rad/s")
+            else:
+                # Update spectral object data
+                spec.args = freqs[idx]
+                spec.data = density[idx]
+                logger.info(f"Spectral data limited to range {w_range[0]:.3f}-{w_range[1]:.3f} rad/s")
+                
+                # If spec object has other attributes that need to be synchronized, update them too
+                # For example, if spec.S exists, it needs to be updated
+                if hasattr(spec, 'S') and spec.S is not None:
+                    spec.S = spec.S[idx]
+        except Exception as e:
+            logger.warning(f"Error applying frequency range limitation: {str(e)}")
+        
+        # If plotting is requested
+        if plot:
+            # Set title
+            if title is None:
+                title_prefix = "Full Scale " if fullscale else ""
+                title = f"{title_prefix}Spectrum of {channel_name}"
+            
+            if use_plotly:
+                # Use Plotly for plotting
+                try:
+                    import plotly.graph_objects as go
+                    
+                    # Get frequency and spectral density
+                    f = spec.args
+                    S = spec.data
+                    
+                    # Create figure
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=f, y=S, mode='lines', name='Spectrum'
+                    ))
+                    
+                    # Set layout
+                    fig.update_layout(
+                        title=title,
+                        xaxis_title='Angular Frequency (rad/s)',
+                        yaxis_title='Spectral Density',
+                        xaxis=dict(range=[w_range[0], min(w_range[1]*1.05, max(f)*1.05)]),
+                        yaxis=dict(range=[0, max(S)*1.05])
+                    )
+                    
+                    # Display frequency range information
+                    range_text = f"Range: {w_range[0]:.2f}-{w_range[1]:.2f} rad/s"
+                    fig.add_annotation(
+                        xref="paper", yref="paper",
+                        x=0.02, y=0.98,
+                        text=range_text,
+                        showarrow=False,
+                        font=dict(size=10),
+                        bgcolor="rgba(255,255,255,0.8)"
+                    )
+                    
+                    # Save or display figure
+                    if save_html:
+                        fig.write_html(save_html)
+                    if show:
+                        fig.show()
+                except ImportError:
+                    logger.warning("Plotly not installed, will use Matplotlib")
+                    use_plotly = False
+            
+            if not use_plotly:
+                # Use Matplotlib for plotting
+                import matplotlib.pyplot as plt
+                
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.plot(spec.args, spec.data, 'b-', linewidth=2)
+                ax.set_title(title)
+                ax.set_xlabel('Angular Frequency (rad/s)')
+                ax.set_ylabel('Spectral Density')
+                ax.grid(True, linestyle='--', alpha=0.7)
+                
+                # Set x-axis range to specified frequency range
+                ax.set_xlim(w_range[0], min(w_range[1]*1.05, max(spec.args)*1.05))
+                ax.set_ylim(0, max(spec.data)*1.05)
+                
+                # Display frequency range information
+                range_text = f"Range: {w_range[0]:.2f}-{w_range[1]:.2f} rad/s"
+                ax.text(0.02, 0.98, range_text, transform=ax.transAxes, 
+                       fontsize=9, va='top', ha='left',
+                       bbox=dict(facecolor='white', alpha=0.8, pad=2))
+                
+                if save_path:
+                    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+                if show:
+                    plt.show()
+                else:
+                    plt.close()
+        
+        return spec
