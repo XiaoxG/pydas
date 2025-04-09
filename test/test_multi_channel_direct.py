@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # Import waveModel directly
 try:
     from waveModel.timeseries import TimeSeries
-    from waveModel.dataframe import PlotData
+    from waveModel.datacontainer import PlotData
 except ImportError:
     print("waveModel module not found. Make sure it's properly installed.")
     sys.exit(1)

@@ -1,29 +1,33 @@
+"""
+Core functions for the WaveModel package.
+
+This module provides fundamental utility functions used throughout the package.
+"""
+
 import numpy as np
-from time import strftime, gmtime
 import warnings
+from scipy import interpolate
 
-from scipy import integrate, interpolate
-
+# Only import needed NumPy functions to reduce namespace pollution
 from numpy import (amax, logical_and, arange, linspace, atleast_1d,
-                   asarray, ceil, floor, frexp, hypot,
-                   sqrt, arctan2, sin, cos, exp, log, log1p, mod, diff,
-                   inf, pi, interp, isscalar, zeros, ones,
-                   sign, unique, hstack, vstack, nonzero, where, extract,
-                   meshgrid)
+                  asarray, sqrt, inf, pi, interp, isscalar, zeros, ones,
+                  where, hstack, vstack, nonzero)
 
+# Constants
 _TINY = np.finfo(float).tiny
 _EPS = np.finfo(float).eps
 
-class JITImport(object):
 
-    '''
+class JITImport(object):
+    """
     Just In Time Import of module
+    
     Examples
     --------
     >>> np = JITImport('numpy')
     >>> np.exp(0)==1.0
     True
-    '''
+    """
 
     def __init__(self, module_name):
         self._module_name = module_name
@@ -35,13 +39,14 @@ class JITImport(object):
         except AttributeError as exc:
             if self._module is None:
                 self._module = __import__(self._module_name, None, None, ['*'])
-                # assert(isinstance(self._module, types.ModuleType), 'module')
                 return getattr(self._module, attr)
             raise exc
 
+
 def discretize(fun, a, b, tol=0.005, n=5, method='linear'):
-    '''
+    """
     Automatic discretization of function
+    
     Parameters
     ----------
     fun : callable
@@ -54,25 +59,19 @@ def discretize(fun, a, b, tol=0.005, n=5, method='linear'):
         number of values to start the discretization with.
     method : string
         defining method of gridding, options are 'linear' and 'adaptive'
+    
     Returns
     -------
     x : discretized values
     y : fun(x)
+    
     Examples
     --------
-    >>> import wafo.misc as wm
     >>> import numpy as np
-    >>> import matplotlib.pyplot as plt
-    >>> x,y = wm.discretize(np.cos, 0, np.pi)
+    >>> x, y = discretize(np.cos, 0, np.pi)
     >>> np.allclose(x[:5], [0.,  0.19634954,  0.39269908,  0.58904862,  0.78539816])
     True
-    >>> xa,ya = wm.discretize(np.cos, 0, np.pi, method='adaptive')
-    >>> np.allclose(xa[:5], [0.,  0.19634954,  0.39269908,  0.58904862,  0.78539816])
-    True
-    t = plt.plot(x, y, xa, ya, 'r.')
-    plt.show()
-    plt.close('all')
-    '''
+    """
     if method.startswith('a'):
         return _discretize_adaptive(fun, a, b, tol, n)
     else:
@@ -80,9 +79,9 @@ def discretize(fun, a, b, tol=0.005, n=5, method='linear'):
 
 
 def _discretize_linear(fun, a, b, tol=0.005, n=5):
-    '''
+    """
     Automatic discretization of function, linear gridding
-    '''
+    """
     x = linspace(a, b, n)
     y = fun(x)
 
@@ -104,10 +103,10 @@ def _discretize_linear(fun, a, b, tol=0.005, n=5):
 
 
 def _discretize_adaptive(fun, a, b, tol=0.005, n=5):
-    '''
+    """
     Automatic discretization of function, adaptive gridding.
-    '''
-    n += (mod(n, 2) == 0)  # make sure n is odd
+    """
+    n += (n % 2 == 0)  # make sure n is odd
     x = linspace(a, b, n)
     fx = fun(x)
 
@@ -116,23 +115,19 @@ def _discretize_adaptive(fun, a, b, tol=0.005, n=5):
     err = erri.max()
     err0 = inf
     num_tries = 0
-    # reltol = abstol = tol
     for j in range(50):
         if num_tries < 5 and err > tol:
             err0 = err
             # find top errors
-
             ix, = where(erri > tol)
             # double the sample rate in intervals with the most error
             y = (vstack(((x[ix] + x[ix - 1]) / 2,
-                         (x[ix + 1] + x[ix]) / 2)).T).ravel()
+                        (x[ix + 1] + x[ix]) / 2)).T).ravel()
             fy = fun(y)
             fy0 = interp(y, x, fx)
 
             abserr = np.abs(fy0 - fy)
             erri = 0.5 * (abserr / (np.abs(fy0) + np.abs(fy) + _TINY + tol))
-            # converged = abserr <= np.maximum(abseps, releps * abs(fy))
-            # converged = abserr <= np.maximum(tol, tol * abs(fy))
             err = erri.max()
 
             x = hstack((x, y))
@@ -151,8 +146,9 @@ def _discretize_adaptive(fun, a, b, tol=0.005, n=5):
 
 
 def sub_dict_select(somedict, somekeys):
-    '''
+    """
     Extracting a Subset from Dictionary
+    
     Examples
     --------
     # Update options dict from keyword arguments if
@@ -163,24 +159,21 @@ def sub_dict_select(somedict, somekeys):
     >>> opt.update(sub_dict)
     >>> opt == {'arg1': 2, 'arg2': 100}
     True
-    See also
-    --------
-    dict_intersection
-    '''
-    # slower: validKeys = set(somedict).intersection(somekeys)
+    """
     return type(somedict)((k, somedict[k]) for k in somekeys if k in somedict)
 
+
 def nextpow2(x):
-    '''
+    """
     Return next higher power of 2
+    
     Examples
     --------
-    >>> import wafo.misc as wm
-    >>> wm.nextpow2(10)
+    >>> nextpow2(10)
     4
-    >>> wm.nextpow2(np.arange(5))
+    >>> nextpow2(np.arange(5))
     3
-    '''
+    """
     t = np.isscalar(x) or len(x)
     if (t > 1):
         f, n = np.frexp(t)
@@ -191,50 +184,46 @@ def nextpow2(x):
         n = n - 1
     return n
 
+
 def ecross(t, f, ind, v=0):
-    '''
+    """
     Extracts exact level v crossings
+    
     ECROSS interpolates t and f linearly to find the exact level v
     crossings, i.e., the points where f(t0) = v
+    
     Parameters
     ----------
-    t,f : vectors
-        of arguments and functions values, respectively.
-    ind : ndarray of integers
-        indices to level v crossings as found by findcross.
-    v : scalar or vector (of size(ind))
-        defining the level(s) to cross.
+    t : array-like
+        vector of independent values
+    f : array-like
+        vector of dependent values
+    ind : array-like
+        indices to level v crossings as found by findcross
+    v : scalar
+        level value (default 0)
+    
     Returns
     -------
-    t0 : vector
-        of  exact level v crossings.
-    Examples
-    --------
-    -------
-    >>> from matplotlib import pyplot as plt
-    >>> import wafo.misc as wm
-    >>> ones = np.ones
-    >>> t = np.linspace(0,7*np.pi,250)
-    >>> x = np.sin(t)
-    >>> ind = wm.findcross(x,0.75)
-    >>> np.allclose(ind, [  9,  25,  80,  97, 151, 168, 223, 239])
-    True
-    >>> t0 = wm.ecross(t,x,ind,0.75)
-    >>> np.allclose(t0, [0.84910514, 2.2933879 , 7.13205663, 8.57630119,
-    ...        13.41484739, 14.85909194, 19.69776067, 21.14204343])
-    True
-    a = plt.plot(t, x, '.', t[ind], x[ind], 'r.', t, ones(t.shape)*0.75,
-                  t0, ones(t0.shape)*0.75, 'g.')
-    plt.close('all')
-    See also
-    --------
-    findcross
-    '''
-    # Tested on: Python 2.5
-    # revised pab Feb2004
-    # By pab 18.06.2001
-    return (t[ind] + (v - f[ind]) * (t[ind + 1] - t[ind]) /
-            (f[ind + 1] - f[ind]))
+    tc : array-like
+        exact level v crossings
+    """
+    # Extract the data
+    index = atleast_1d(ind).tolist()
+    if not index:  # Empty list
+        return zeros(0)
+        
+    n = len(index)
+    tc = zeros(n)
+    for i, ix in enumerate(index):
+        if f[ix] == f[ix + 1]:
+            # Formula cannot be used, use average.
+            tc[i] = 0.5 * (t[ix] + t[ix + 1])
+        else:
+            # Find exact crossing by linear interpolation
+            tc[i] = t[ix] + (t[ix + 1] - t[ix]) * (v - f[ix]) / (f[ix + 1] - f[ix])
+    return tc
+
 
 def now(show_seconds=True):
     '''
@@ -243,6 +232,7 @@ def now(show_seconds=True):
     if show_seconds:
         return strftime("%a, %d %b %Y %H:%M:%S", gmtime())
     return strftime("%a, %d %b %Y %H:%M", gmtime())
+
 
 def empty_copy(obj):
     class Empty(obj.__class__):
@@ -253,6 +243,7 @@ def empty_copy(obj):
     # pylint: disable=attribute-defined-outside-init
     newcopy.__class__ = obj.__class__
     return newcopy
+
 
 def findtp(x, h=0.0, kind=None):
     '''

@@ -1,4 +1,4 @@
-from waveModel.core import ecross, now, nextpow2, discretize
+from waveModel.core import ecross, now, nextpow2, discretize, sub_dict_select
 
 import warnings
 import os
@@ -13,11 +13,10 @@ from scipy.integrate import simps, trapz
 import scipy.interpolate as interpolate
 from scipy.interpolate.interpolate import interp1d, interp2d
 from numpy.fft import fft
-from waveModel.plotbackend import plotbackend as plt
 from waveModel.covdata import CovData1D
-from waveModel.dispersion_relation import k2w, w2k
-from waveModel.dataframe import PlotData
-from waveModel.misc import (cart2polar, polar2cart, sub_dict_select, gravity as _gravity)
+from waveModel.wavemodels import k2w, w2k
+from waveModel.datacontainer import PlotData
+from waveModel.misc import (cart2polar, polar2cart, gravity as _gravity)
 _EPS = np.finfo(float).eps
 _TINY = np.finfo(float).tiny
 
