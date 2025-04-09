@@ -11,7 +11,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="pydas",
-    version="1.0.1",
+    version="1.0.2",
     author="SJTU/SKLOE",
     author_email="xiaoxguo@sjtu.edu.cn",
     description="Python data analysis system, used for processing and analyzing large time series data @ SJTU/SKLOE",
@@ -19,10 +19,20 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=find_packages(),
+    keywords=["data analysis", "time series", "signal processing", "oceanic engineering", "spectral analysis"],
     classifiers=[
+        "Development Status :: 5 - Production/Stable",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
+        "Topic :: Scientific/Engineering",
+        "Topic :: Scientific/Engineering :: Information Analysis",
+        "Topic :: Scientific/Engineering :: Visualization",
     ],
     python_requires=">=3.6",
     install_requires=[
@@ -45,5 +55,10 @@ setup(
     },
     package_data={
         "pydas_viz": ["*.py"],
+    },
+    project_urls={
+        "Bug Tracker": "https://gitee.com/xiaoxianguo/pydas/issues",
+        "Documentation": "https://gitee.com/xiaoxianguo/pydas/wikis",
+        "Source Code": "https://gitee.com/xiaoxianguo/pydas",
     },
 ) 

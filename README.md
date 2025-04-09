@@ -1,315 +1,261 @@
 # PyDAS - Python Data Analysis System
 
-PyDAS is a powerful Python library for processing and analyzing waveform data, offering robust capabilities for data import, processing, analysis, and visualization.
+A comprehensive data analysis system for processing and analyzing large time series data in Python.
 
-## Key Features
+## Overview
 
-- Support for multiple data formats import and export
-- Powerful time series data processing and analysis
-- Advanced filtering capabilities (lowpass, highpass filters)
-- Various visualization tools including:
-  - Time series visualization
-  - Spectrum analysis plots
-  - Histograms
-  - XY scatter plots (with density visualization)
-- Interactive plotting (based on Plotly and Matplotlib)
-- Flexible data management and channel operations
+PyDAS is a powerful Python library designed for analyzing and processing time series data, with a focus on signal processing, spectral analysis, and data visualization. It provides a comprehensive set of tools for engineers and scientists working with large datasets, particularly in the field of oceanic engineering.
 
-## Latest Updates
+## Features
 
-### XY Scatter Plot Enhancements
+- **Data Processing & Analysis**
+  - Multiple data format support (DAT, MAT, CSV, etc.)
+  - Advanced filtering (lowpass, highpass, custom)
+  - Statistical analysis and data cleaning
+  - Downsampling and resampling capabilities
+  - Outlier detection and handling
 
-The XY scatter plot functionality has been enhanced with the following features:
+- **Visualization**
+  - Interactive time series plots
+  - Spectral analysis with customizable parameters
+  - Histograms with statistical information
+  - XY scatter plots with density visualization
+  - Full-scale analysis visualization
 
-- **Automatic Downsampling**: Intelligently reduces point count for large datasets while preserving data patterns
-- **Density Visualization**: Provides heatmap/contour overlay to show data concentration in dense point clouds
-- **Statistical Information**: Optional display of key statistics for both channels and their relationship
-- **Linear Regression**: Fit a trend line to visualize correlation between channels
-- **1:1 Aspect Ratio**: Maintains equal scaling on both axes for accurate spatial relationships
+- **Performance Optimization**
+  - Numba JIT compilation for computationally intensive operations
+  - Automatic downsampling for large datasets
+  - Vectorized operations for faster processing
+  - WebGL rendering for interactive visualization of large datasets
 
-### Spectral Analysis with Plotly Support
-
-The spectral analysis feature in PyDAS allows users to perform frequency domain analysis on time series data. It utilizes the `waveModel` library to compute spectral characteristics of channel data. Key features include:
-
-- **Multiple Analysis Methods**: Support for covariance-based ('cov') and Welch's periodogram ('psd') methods
-- **Filtering Options**: Apply low-pass filtering before analysis
-- **Interactive Visualization**: Use Plotly for interactive plots or Matplotlib for static plots
-- **Spectral Characteristics**: Calculate and display key spectral parameters like significant wave height and peak period
-- **Customization**: Customize plot appearance, frequency ranges, and output options
+- **Scientific Computing**
+  - Spectral density estimation
+  - Moment calculation for spectral analysis
+  - Cross-correlation between channels
+  - Signal derivatives and transformations
 
 ## Installation
 
 ```bash
+# Install from PyPI
 pip install pydas
-```
 
-Or install from source:
-
-```bash
-git clone https://github.com/yourusername/pydas.git
+# Or install from source
+git clone https://gitee.com/xiaoxianguo/pydas.git
 cd pydas
 pip install -e .
 ```
 
-## Basic Usage
-
-```python
-from pydas import PyDAS
-
-# Load data
-data = PyDAS('my_data_file.out')
-
-# Plot channel data
-data.plot_channel('Channel1')
-
-# Create XY scatter plot with new density feature
-data.plot_xy(
-    x_ch_idx='Channel1',
-    y_ch_idx='Channel2',
-    density_plot=True,
-    downsampling=True,
-    max_points=10000
-)
-
-# Create histogram
-data.plot_histogram('Channel1', bins=50, fit_gaussian=True)
-
-# Apply filters
-data.apply_lowpass_filter('Channel1', cutoff=0.1)
-
-# Perform spectral analysis
-spec, fig = data.spectral_analysis(
-    channel_name='Channel1',  # Channel name or index
-    method='cov',             # Analysis method: 'cov' or 'psd'
-    L=1024,                   # Window size
-    use_plotly=True           # Use Plotly for interactive plotting
-)
-
-# Perform spectral analysis on multiple channels
-results = data.spectral_analysis(
-    channel_name=['Channel1', 'Channel2', 'Channel3'],  # List of channels
-    method='psd',                                        # Analysis method
-    subplot_layout=(2, 2),                               # Optional layout control
-    use_plotly=True                                      # Use Plotly for interactive plotting
-)
-
-# Access results for individual channels
-spec1 = results['Channel1'][0]  # Get spectrum object for Channel1
-fig1 = results['Channel1'][1]   # Get figure for Channel1 (if individual plots were created)
-```
-
-## Core Functions
-
-### Data Processing Functions
-
-- **diff1d**: Calculate the derivative of a one-dimensional array
-- **data_change_fs**: Change the sampling frequency of data
-- **add_channel**: Add a new channel to the dataset
-- **delete_channel**: Remove a channel from the dataset
-- **filter_channel**: Apply filter to a channel
-- **add_diff**: Add derivative of a channel as a new channel
-- **add_diff2**: Add second derivative of a channel as a new channel
-- **to_fullscale**: Convert data to full scale based on unit conversion
-- **updateST**: Update statistical information for all channels
-
-### Visualization Functions
-
-#### plot_channel Function
-
-The `plot_channel` function provides powerful data visualization capabilities, supporting both single-channel and multi-channel data with interactive features.
-
-```python
-data.plot_channel(
-    ch_name,           # Channel name or list
-    sseg=0,            # Segment index
-    title=None,        # Title
-    xlabel='Time (s)', # X-axis label
-    ylabel=None,       # Y-axis label
-    xlim=None,         # X-axis range
-    ylim=None,         # Y-axis range
-    grid=True,         # Show grid
-    show=True,         # Show chart
-    save_path=None,    # Save path
-    use_plotly=True,   # Use Plotly
-    downsampling=True, # Apply downsampling
-    max_points=10000,  # Maximum points
-    save_html=None,    # HTML save path
-    dpi=300,           # Image DPI
-    width=None,        # Chart width
-    height=None,       # Chart height
-    color=None,        # Line color
-    alpha=0.8,         # Transparency
-    linewidth=1,       # Line width
-    figsize=(12, 4),   # Figure size
-    stats=True,        # Show statistics
-    table_width=0.3,   # Statistics table width
-    column_widths=None # Column widths
-)
-```
-
-#### plot_xy Function
-
-```python
-data.plot_xy(
-    x_ch_idx,              # X-axis channel 
-    y_ch_idx,              # Y-axis channel
-    title=None,            # Plot title
-    xlabel=None,           # X-axis label
-    ylabel=None,           # Y-axis label
-    xlim=None,             # X-axis limits
-    ylim=None,             # Y-axis limits
-    grid=True,             # Show grid
-    show=True,             # Display plot
-    use_plotly=True,       # Use Plotly for interactive plot
-    downsampling=True,     # Apply downsampling for large datasets
-    max_points=10000,      # Maximum points to display
-    density_plot=False,    # Show density contours
-    density_colorscale='Viridis', # Colorscale for density
-    show_stats=False,      # Show statistical information
-    fit_line=False,        # Fit linear regression line
-    fit_color='red'        # Color for fit line
-)
-```
-
-#### spectral_analysis Function
-
-The `spectral_analysis` method allows for detailed frequency domain analysis of time series data.
-
-```python
-spec, fig = data.spectral_analysis(
-    channel_name='Channel1',  # Channel name or index (or list of channels)
-    method='cov',             # Analysis method: 'cov' or 'psd'
-    L=1024,                   # Window size for spectral analysis
-    filtered=False,           # Apply low-pass filtering
-    cutoff_freq=None,         # Cutoff frequency for low-pass filter
-    plot=True,                # Generate plot
-    title=None,               # Plot title (string or list for multiple channels)
-    xlim=None,                # X-axis limits (single tuple or list of tuples)
-    ylim=None,                # Y-axis limits (single tuple or list of tuples)
-    figsize=(10, 6),          # Figure size for Matplotlib
-    show=True,                # Display plot
-    save_path=None,           # Path to save static plot
-    dpi=300,                  # DPI for saved static plot
-    use_plotly=True,          # Use Plotly for interactive plotting
-    save_html=None,           # Path to save interactive HTML plot
-    width=None,               # Width of plot in pixels (Plotly only)
-    height=None,              # Height of plot in pixels (Plotly only)
-    subplot_layout=None       # Custom layout for multiple channel plots (rows, cols)
-)
-```
-
-## Spectral Analysis Usage Examples
-
-### Basic Usage
+## Quick Start
 
 ```python
 from pydas import PyDAS
 import numpy as np
 
-# Load data
-data = PyDAS('your_data_file.out')
+# Load data file
+data = PyDAS(filename="your_data_file.csv")
 
-# Perform basic spectral analysis on a channel
+# Basic info
+print(f"Loaded data with {len(data.channels)} channels")
+print(f"Available channels: {data.channels}")
+print(f"Sampling frequency: {data.fs} Hz")
+
+# Plot a channel
+data.plot_channel("channel1", use_plotly=True, save_html="channel_plot.html")
+
+# Apply a filter
+data.apply_lowpass_filter("channel1", cutoff=2.0)  # 2.0 Hz cutoff
+data.plot_channel("channel1", title="Filtered Data")
+
+# Perform spectral analysis
 spec, fig = data.spectral_analysis(
-    channel_name='Channel1',  # Channel name or index
-    method='cov',             # Analysis method: 'cov' or 'psd'
-    L=1024,                   # Window size
-    use_plotly=True           # Use Plotly for interactive plotting
+    channel_name="channel1",
+    method="cov",  # Covariance method
+    L=1024,        # Window size
+    use_plotly=True
 )
 
-# Get spectral characteristics
-# Handle the case where moment returns a tuple
-moment_0 = spec.moment(0)
-if isinstance(moment_0, tuple) and len(moment_0) > 0:
-    if isinstance(moment_0[0], list):
-        m0 = float(moment_0[0][0])
-    else:
-        m0 = float(moment_0[0])
-else:
-    m0 = float(moment_0)
-
-# Calculate significant wave height
-Hm0 = 4.0 * np.sqrt(m0)
-print(f"Significant wave height: {Hm0:.3f} m")
+# Extract spectral characteristics
+m0 = float(spec.moment(0))
+print(f"Zeroth moment (m0): {m0:.5f}")
+print(f"Significant wave height: {4.0 * np.sqrt(m0):.5f}")
 ```
 
-### Advanced Spectral Analysis
+## Usage Examples
+
+### Channel Operations
 
 ```python
-# Perform filtered spectral analysis
-spec, fig = data.spectral_analysis(
-    channel_name='Channel1',
-    method='psd',            # Use Welch's method
-    filtered=True,           # Apply low-pass filtering
-    cutoff_freq=1.5,         # Cutoff frequency in Hz
-    L=2048,                  # Larger window for better resolution
-    title="Filtered Spectrum Analysis",
-    xlim=(0, 2),             # Limit x-axis range
-    use_plotly=True,
-    save_html="spectrum.html",  # Save interactive plot as HTML
-    width=1000,              # Plot width in pixels
-    height=600               # Plot height in pixels
+# Add a new channel
+data.add_channel("new_channel", values=np.sin(np.linspace(0, 10*np.pi, len(data["channel1"]))), unit="m")
+
+# Add derivative of a channel
+data.add_diff1("channel1", new_ch_name="channel1_derivative")
+
+# Remove mean from a channel
+data.remove_mean("channel1")
+
+# Cut time series to a specific range
+data.cut_series(start_t=10, end_t=50)  # Cut between 10s and 50s
+```
+
+### Advanced Visualization
+
+```python
+# Interactive time series plot with statistics
+data.plot_channel(
+    "channel1", 
+    use_plotly=True, 
+    stats=True, 
+    downsampling=True, 
+    max_points=20000
 )
-```
 
-### Multi-Channel Spectral Analysis
+# XY scatter plot with density visualization
+data.plot_xy(
+    x_ch_idx="channel1", 
+    y_ch_idx="channel2", 
+    density_plot=True, 
+    fit_line=True,
+    use_plotly=True
+)
 
-```python
-# Analyze multiple channels with subplots in a single figure
+# Histogram with Gaussian fitting
+data.plot_histogram(
+    "channel1", 
+    bins=50, 
+    fit_gaussian=True, 
+    show_stats=True
+)
+
+# Multi-channel spectral analysis
 results = data.spectral_analysis(
-    channel_name=['Channel1', 'Channel2', 'Channel3', 'Channel4'],
-    method='cov',
-    L=1024,
-    use_plotly=True,
-    subplot_layout=(2, 2),  # 2 rows, 2 columns layout
-    save_html="multi_channel_spectrum.html"
-)
-
-# The results are returned as a dictionary with channel names as keys
-for channel, (spec, fig) in results.items():
-    if channel != 'combined':  # 'combined' key contains the combined figure
-        # Process individual channel results
-        if spec is not None:
-            # Get spectral moments for this channel
-            moment_0 = spec.moment(0)
-            # Process the moment appropriately (handle tuple case)
-            if isinstance(moment_0, tuple) and len(moment_0) > 0:
-                if isinstance(moment_0[0], list):
-                    m0 = float(moment_0[0][0])
-                else:
-                    m0 = float(moment_0[0])
-            else:
-                m0 = float(moment_0)
-                
-            # Calculate significant wave height
-            Hm0 = 4.0 * np.sqrt(m0)
-            print(f"Channel {channel} - Significant wave height: {Hm0:.3f} m")
-
-# Access the combined figure from the results
-combined_fig = results.get('combined', (None, None))[1]
-
-# Analyze multiple channels with individual plots for each
-individual_results = data.spectral_analysis(
-    channel_name=['Channel1', 'Channel2'],
-    method='psd',
-    subplot_layout=(1, 1),  # Force individual plots (1x1 layout)
-    save_html="individual_spectrums.html"  # Channel names will be appended
+    channel_name=["channel1", "channel2", "channel3"], 
+    method="psd", 
+    subplot_layout=(2, 2),
+    use_plotly=True
 )
 ```
 
-## Performance Optimization
+### Data Import and Export
 
-PyDAS includes several optimizations for handling large datasets:
+```python
+# Import data
+wave_data = PyDAS(filename="wave_data.csv")
 
-- Numba-accelerated computation-heavy functions
-- Vectorized operations to replace loops
-- Caching optimizations to avoid redundant calculations
-- Memory-mapped file reading for large data files
-- Adaptive downsampling for visualization
-- WebGL rendering for large datasets
-- Parallel processing to improve multi-core performance
+# Export to MAT file
+wave_data.to_mat("processed_data.mat")
 
-## Additional Resources
+# Export to DAT file
+wave_data.to_dat("processed_data.dat")
 
-- [API Documentation](docs/api.md)
-- [Example Scripts](examples/) 
+# Export to CSV
+wave_data.to_csv("processed_data.csv")
+```
+
+### Full-Scale Analysis
+
+```python
+# Perform spectral analysis with model scale
+spec_model, fig_model = data.spectral_analysis(
+    channel_name="wave_height",
+    method="cov",
+    use_plotly=True,
+    title="Model Scale Spectrum"
+)
+
+# Perform full-scale spectral analysis (with scale factor λ)
+spec_full, fig_full = data.spectral_analysis(
+    channel_name="wave_height",
+    method="cov",
+    use_plotly=True,
+    fullscale=True,  # Enable full scale
+    title="Full Scale Spectrum"
+)
+
+# Compare results
+Hm0_model = 4.0 * np.sqrt(float(spec_model.moment(0)))
+Hm0_full = 4.0 * np.sqrt(float(spec_full.moment(0)))
+print(f"Model scale Hm0: {Hm0_model:.4f} m")
+print(f"Full scale Hm0: {Hm0_full:.4f} m")
+```
+
+## API Reference
+
+### Core Functions
+
+| Category | Function | Description |
+|----------|----------|-------------|
+| **Channel Operations** | `add_channel()` | Add a new channel to the dataset |
+| | `delete_channel()` | Delete a channel from the dataset |
+| | `select_channels()` | Select and keep specific channels |
+| | `rename_channel()` | Rename an existing channel |
+| | `change_channel_order()` | Change the order of channels |
+| **Data Processing** | `remove_mean()` | Remove mean value from channel data |
+| | `add_value()` | Add constant value to channel data |
+| | `multiply_value()` | Multiply channel data by constant value |
+| | `cut_series()` | Cut time series to specified range |
+| | `move_data()` | Move channel data by specified offset |
+| | `data_wash()` | Clean data, detect and interpolate outliers |
+| **Differential Operations** | `add_diff1()` | Calculate and add first derivative |
+| | `add_diff2()` | Calculate and add second derivative |
+| **Filtering** | `apply_lowpass_filter()` | Apply lowpass filter to channel data |
+| | `apply_highpass_filter()` | Apply highpass filter to channel data |
+| **Data Alignment** | `move_ccor()` | Move channel data using cross-correlation |
+| | `find_move_ccor()` | Find points to move between channels |
+| **Data Output** | `to_dat()` | Export data to DAT file |
+| | `to_mat()` | Export data to MAT file |
+| | `to_csv()` | Export data to CSV file |
+| | `write()` | Write data to generic file |
+| **Visualization** | `plot_channel()` | Plot channel time series |
+| | `plot_histogram()` | Generate histogram with statistics |
+| | `plot_xy()` | Create XY scatter plot |
+| | `spectral_analysis()` | Perform spectral analysis on channel |
+| **Data Conversion** | `fix_unit()` | Fix channel unit |
+| | `to_fullscale()` | Convert model scale data to prototype scale |
+
+### Utility Functions
+
+| Function | Description |
+|----------|-------------|
+| `diff1d()` | Calculate derivative of one-dimensional array |
+| `data_change_fs()` | Change data sampling frequency |
+| `print_info()` | Print basic information about dataset |
+| `print_channel_info()` | Print detailed channel information |
+| `print_statistics()` | Print statistical information for channels |
+| `updateST()` | Update statistical information for all channels |
+| `updateChN()` | Update channel count information |
+
+## Dependencies
+
+- numpy (≥1.19.0)
+- pandas (≥1.1.0)
+- scipy (≥1.5.0)
+- matplotlib (≥3.3.0)
+- plotly (≥5.0.0)
+- numba (≥0.50.0)
+- dask (≥2021.6.0)
+- kaleido (≥0.2.0)
+- scikit-learn (≥0.24.0)
+
+## License
+
+MIT License
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Citation
+
+If you use PyDAS in your research, please cite:
+
+```
+@software{PyDAS2024,
+  author = {Guo, Xiaoxiang},
+  title = {PyDAS: Python Data Analysis System},
+  url = {https://gitee.com/xiaoxianguo/pydas},
+  version = {1.0.2},
+  year = {2024},
+}
+``` 
