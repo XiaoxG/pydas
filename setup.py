@@ -15,6 +15,7 @@ setup(
     author="SJTU/SKLOE",
     author_email="xiaoxguo@sjtu.edu.cn",
     description="Python data analysis system, used for processing and analyzing large time series data @ SJTU/SKLOE",
+    url="https://gitee.com/xiaoxianguo/pydas",
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=find_packages(),
