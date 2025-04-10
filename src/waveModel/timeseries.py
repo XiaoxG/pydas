@@ -12,8 +12,7 @@ from scipy.signal.windows import parzen
 
 from waveModel.core import nextpow2
 from waveModel.covdata import CovarianceEstimator
-from waveModel.specdata import SpecData1D
-from waveModel.datacontainer import DataContainer
+
 
 def array2timeseries(x):
     """
@@ -22,7 +21,7 @@ def array2timeseries(x):
     """
     return TimeSeries(x[:, 1::], x[:, 0].ravel())
 
-class TimeSeries(DataContainer):
+class TimeSeries():
     '''
     Container class for 1D TimeSeries data objects in WAFO
     Member variables
@@ -209,6 +208,9 @@ class TimeSeries(DataContainer):
         "Stochastic Processes", HOLDEN-DAY,
         pp 66--103
         '''
+        # 延迟导入SpecData1D，避免循环导入
+        from waveModel.specdata import SpecData1D
+        
         x = atleast_1d(self.data).ravel()
         dt = self._check_dt(dt=None)
 

@@ -10,8 +10,6 @@ from numpy.fft import fft, ifft
 from scipy.signal import welch, detrend, get_window, butter, filtfilt
 import warnings
 
-from waveModel.datacontainer import DataContainer
-
 
 __all__ = ['CovData1D', 'CovarianceEstimator']
 
@@ -25,7 +23,7 @@ def _set_seed(iseed):
             np.random.seed(iseed)
 
 
-class CovData1D(DataContainer):
+class CovData1D():
     """
     Container class for 1D auto covariance data objects.
     
@@ -157,6 +155,7 @@ class CovData1D(DataContainer):
         S : SpecData1D
             Spectral density object.
         """
+        # 延迟导入避免循环依赖
         from waveModel.specdata import SpecData1D
         
         # Check that correlation is defined for the negative lags

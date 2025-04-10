@@ -928,9 +928,6 @@ class PyDAS:
                 series = series[:n_sample]
             elif len(series) < n_sample:
                 series = np.pad(series, (0, n_sample - len(series)), 'constant', constant_values=0)
-                
-            # Apply coefficient
-            series = series * coef
             
             # Add to data
             self.data[sseg][name] = series
@@ -1260,7 +1257,7 @@ class PyDAS:
         # Print statistics for each segment
         for idx, segment_stats in enumerate(self.segStatis):
             logger.info(f'Seg{idx:02d}')
-            logger.info(segment_stats.to_string(float_format='% .3E', justify='center'))
+            logger.info('\n' + segment_stats.to_string(float_format='% .3E', justify='center'))
         
         
         # Export to files if requested
@@ -1572,7 +1569,7 @@ class PyDAS:
         - Handles multiple wave gauges
         - Updates channel information
         """
-        wavecase_cal = PyDAS(wavefname)
+        wavecase_cal = PyDAS(wavefname, lam = self.__lam__)
         fs_cal = wavecase_cal.__fs__
         nch = wavecase_cal.data[0].shape[1]
         for i in range(nch):
@@ -1655,7 +1652,7 @@ class PyDAS:
                 norm_factor = np.sqrt(np.sum(base_rmmean**2) * np.sum(reference_remean**2))
                 if norm_factor > 0:
                     normalized_corr = max_corr / norm_factor
-                    logger.info(f"Maximum correlation between '{base_chName}' and '{reference_ch}': {normalized_corr:.4f} at lag {lag}")
+                    logger.debug(f"Maximum correlation between '{base_chName}' and '{reference_ch}': {normalized_corr:.4f} at lag {lag}")
                 else:
                     logger.warning("Could not normalize correlation (division by zero)")
             except Exception as e:
@@ -1664,8 +1661,8 @@ class PyDAS:
             
             # Move the target channel by the calculated lag
             try:
-                self.move_data(to_move_chName, lag, sseg=sseg)
-                logger.info(f"Moved channel '{to_move_chName}' by {lag} points based on correlation")
+                self.move_data(to_move_chName, -lag, sseg=sseg)
+                logger.info(f"Moved channel '{to_move_chName}' by {-lag} points based on correlation")
             except Exception as e:
                 logger.error(f"Error moving channel '{to_move_chName}': {str(e)}")
                 raise ValueError(f"Failed to move channel: {str(e)}")
@@ -1735,6 +1732,7 @@ class PyDAS:
                 correlation = correlate(base_rmmean, reference_remean, method='fft')
                 max_corr_idx = np.argmax(correlation)
                 lag = max_corr_idx - n_sample + 1
+                lag = - lag
                 
                 # Log correlation strength
                 max_corr = correlation[max_corr_idx]

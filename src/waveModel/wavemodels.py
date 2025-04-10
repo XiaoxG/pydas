@@ -15,17 +15,12 @@ Torsethaugen     - Torsethaugen double peaked (swell + wind) spectrum model
 
 import warnings
 import numpy as np
-from numpy import (inf, atleast_1d, minimum, maximum, exp, log, sqrt, where, pi, 
-                  isfinite, ones_like, zeros_like, flatnonzero, tanh, cosh, 
-                  sin, cos, arctan2, sign, newaxis, arange, vstack, ones, 
-                  real, flipud, clip, hstack, sinc, isnan, asarray, finfo,
-                  sinh, expm1)
-from scipy.fftpack import fft
+from numpy import (inf, atleast_1d, minimum, exp, log, sqrt, where, pi, ones_like, zeros_like, flatnonzero, tanh, cosh, 
+                  sin, cos, arctan2, sign, finfo)
 import scipy.special as sp
 import scipy.integrate as integrate
 from scipy.interpolate import interp1d
 import scipy.optimize as optimize
-from waveModel.specdata import SpecData1D, SpecData2D
 
 # Constants
 _EPS = finfo(float).eps
@@ -322,6 +317,8 @@ class ModelSpectrum(object):
         S : SpecData1D object
             member attributes of model spectrum are copied to S.workspace
         """
+        # 延迟导入SpecData1D，避免循环导入
+        from waveModel.specdata import SpecData1D
 
         if w is None:
             if wc is None:
