@@ -115,6 +115,8 @@ from scipy.spatial.transform import Rotation as R
 import logging
 import warnings
 from waveModel.timeseries import TimeSeries
+import datetime
+
 # Import numba for acceleration
 try:
     from numba import jit, float64, int32, void, prange
@@ -123,19 +125,17 @@ except ImportError:
     NUMBA_AVAILABLE = False
     print("Numba not available. Some functions will run slower.")
 
-# Configure logger
+# Initialize module-level logger
 logger = logging.getLogger(__name__)
-if not logger.handlers:
-    # Avoid adding handlers multiple times
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
 
-# You can control the log level externally with:
-# import logging
-# logging.getLogger('PyDAS').setLevel(logging.DEBUG)  # or INFO, WARNING, ERROR, CRITICAL
+# 日志级别映射
+LOG_LEVELS = {
+    'debug': logging.DEBUG,
+    'info': logging.INFO,
+    'warning': logging.WARNING,
+    'error': logging.ERROR,
+    'critical': logging.CRITICAL
+}
 
 def diff1d(series, dx=1.0):
     """
@@ -497,7 +497,7 @@ class PyDAS:
         Sampling frequency in Hz
     """
     
-    def __init__(self, filename, lam, sseg='all'):
+    def __init__(self, filename, lam, sseg='all', log_level='info'):
         """
         Initialize PyDAS object and read data file.
         
@@ -509,6 +509,8 @@ class PyDAS:
             Scale factor for data conversion, default is 1
         sseg : int or str, optional
             Segment index to read, 'all' for all segments, default is 'all'
+        log_level : str, optional
+            Logging level ('debug', 'info', 'warning', 'error', 'critical'), default is 'info'
             
         Notes:
         ------
@@ -516,6 +518,9 @@ class PyDAS:
         - Processes channel information and data segments
         - Calculates basic statistics for each channel
         """
+        # Configure logger
+        self.set_logger(log_level)
+        
         # Initialize basic properties
         self.__lam__ = lam
         self.__fs__ = 1  # Default sampling frequency, will be updated during reading
@@ -545,6 +550,42 @@ class PyDAS:
             self.chInfo = pd.DataFrame(columns=['Name', 'Unit'])
             self.data = {}
             logger.info("Created empty PyDAS object. Use load() method to read data or set data manually.")
+
+    def set_logger(self, level='info'):
+        """
+        Configure the logger for the PyDAS class.
+        
+        Parameters:
+        -----------
+        level : str, optional
+            Logging level ('debug', 'info', 'warning', 'error', 'critical'), default is 'info'
+        
+        Returns:
+        --------
+        None
+        
+        Notes:
+        ------
+        - Sets the logging level for the PyDAS logger
+        - Available levels: 'debug', 'info', 'warning', 'error', 'critical'
+        """
+        level = level.lower()
+        if level not in LOG_LEVELS:
+            level = 'info'
+            
+        # Set the logger level
+        log_level = LOG_LEVELS[level]
+        logger.setLevel(log_level)
+        
+        # Add handler if needed
+        if not logger.handlers:
+            # Avoid adding handlers multiple times
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            
+        logger.info(f"Logger level set to: {level.upper()}")
 
     def __read__(self, sseg):
         """
@@ -600,7 +641,8 @@ class PyDAS:
             chInfoDict = {'Index': chIdx, 'Name': chName, 'Unit': chUnit,
                           'Coef': chCoef}
             column = ['Name', 'Unit', 'Coef']
-            self.chInfo = pd.DataFrame(chInfoDict, index=chIdx, columns=column)
+            self.chInfo = pd.DataFrame(chInfoDict, columns=column)
+            self.chInfo.index = range(1, self.__chN__ + 1)
 
             # Initialize arrays for segment data
             sampNum = [0] * self.__segN__  # Number of samples in each segment
@@ -994,8 +1036,9 @@ class PyDAS:
         
         Parameters:
         -----------
-        chnames : list of str
-            List of channel names to keep
+        chnames : str or list of str
+            Channel name(s) to keep. Can be a single string for one channel
+            or a list of strings for multiple channels.
             
         Returns:
         --------
@@ -1008,6 +1051,10 @@ class PyDAS:
         - Removes all channels not in the specified list
         - Updates channel information and statistics
         """
+        # Check if input is a string (single channel) and convert to list
+        if isinstance(chnames, str):
+            chnames = [chnames]
+            
         # Validate channel names
         valid_chnames = []
         for name in chnames:
@@ -1112,7 +1159,7 @@ class PyDAS:
         """
         # Print to console
         logger.info('Channel Information:')
-        logger.info(self.chInfo.to_string())
+        logger.info('\n' + self.chInfo.to_string())
         
         # Export to text file if requested
         if printTxt:
@@ -1345,14 +1392,14 @@ class PyDAS:
             logger.error(f"Error exporting to MAT file: {str(e)}")
             return False
 
-    def fix_unit(self, chIdx, newunit, pInfo=False):
+    def fix_unit(self, chName, newunit, pInfo=False):
         """
         Fix channel unit.
         
         Parameters:
         -----------
-        chIdx : int or str
-            Channel index or name
+        chName : str
+            Channel name
         newunit : str
             New unit to set
         pInfo : bool, optional
@@ -1364,13 +1411,25 @@ class PyDAS:
         - Validates unit conversion
         - Maintains data integrity
         """
-        self.chInfo.loc[chIdx, 'Unit'] = newunit
+        # 检查通道名是否存在
+        if chName not in self.chInfo['Name'].values:
+            logger.warning(f"Channel '{chName}' does not exist.")
+            return False
+            
+        # 找到对应的索引
+        idx = self.chInfo.index[self.chInfo['Name'] == chName].tolist()[0]
+        
+        # 更新单位
+        self.chInfo.loc[idx, 'Unit'] = newunit
+        logger.info(f"Channel '{chName}' unit updated to: {newunit}")
+        
         if pInfo:
             logger.info('-' * 50)
-            logger.info(self.chInfo.to_string(justify='center'))
+            logger.info('\n' + self.chInfo.to_string(justify='center'))
             logger.info('-' * 50)
 
-    def to_fullscale(self, lam, rho=1.025, g=9.807, pInfo=False):
+
+    def to_fullscale(self, rho=1.025, g=9.807, pInfo=False):
         """
         Convert model scale data to prototype scale.
         
@@ -1393,7 +1452,7 @@ class PyDAS:
         - Maintains data consistency
         """
         if self.__scale__ == 'prototype':
-            logger.info('The data is already upscaled.')
+            logger.warning('The data is already upscaled.')
             return
         else:
             logger.info('Please make sure the channel units are all checked!')
@@ -1401,7 +1460,6 @@ class PyDAS:
                 logger.info(self.chInfo.to_string(
                     justify='center', columns=['Name', 'Unit']))
             self.rho = rho
-            self.__lam__ = lam
             self.__scale__ = 'prototype'
             
             # Predefined unit conversion dictionary
@@ -2001,7 +2059,6 @@ class PyDAS:
         """
         from scipy.signal import butter, filtfilt
         import copy
-        import pandas as pd
         
         def _butter_highpass(cutoff, fs, order=5):
             nyq = 0.5 * fs
@@ -2251,52 +2308,32 @@ class PyDAS:
             If start or stop times are invalid
         """
         def moveTimestr(Timestr, seconds_float):
-            """
-            Move a time string by a specified number of seconds.
-            
-            Parameters:
-            -----------
-            Timestr : str
-                Time string in format 'HH:MM:SS.sss'
-            seconds_float : float
-                Number of seconds to move the time
-                
-            Returns:
-            --------
-            str
-                New time string after moving
-            """
-            h, m, s = Timestr.split(':')
-            seconds = int(h) * 3600 + int(m) * 60 + float(s) + seconds_float
-            h_new = int(seconds // 3600)
-            m_new = int((seconds % 3600) // 60)
-            s_new = seconds % 60
-            return '{0:02d}:{1:02d}:{2:06.3f}'.format(h_new, m_new, s_new)
+            seconds = int(seconds_float)
+            milliseconds = int((seconds_float-seconds)*1000)
+            startTime = datetime.datetime.strptime(Timestr,"%H:%M:%S.%f")
+            startTime_new = (startTime + datetime.timedelta(seconds=seconds, milliseconds=milliseconds)).strftime("%H:%M:%S.%f")
+            return startTime_new[:-5]
 
-        if isinstance(start, str):
-            start_time = start
-            stop_time = stop
-            start_seconds = int(start.split(':')[0]) * 3600 + int(
-                start.split(':')[1]) * 60 + float(start.split(':')[2])
-            stop_seconds = int(stop.split(':')[0]) * 3600 + int(
-                stop.split(':')[1]) * 60 + float(stop.split(':')[2])
-        else:
-            start_seconds = start
-            stop_seconds = stop
-            start_time = '{0:02d}:{1:02d}:{2:06.3f}'.format(
-                0, 0, start_seconds)
-            stop_time = '{0:02d}:{1:02d}:{2:06.3f}'.format(0, 0, stop_seconds)
+        startIndx = int(start * self.__fs__)
+        stopIndx = int(stop * self.__fs__)
+        lngth = self.data[sseg].index[-1]
+        self.data[sseg] = self.data[sseg].drop(range(startIndx + 1))
+        self.data[sseg] = self.data[sseg].drop(range(stopIndx, lngth + 1))
+        self.data[sseg] = self.data[sseg].reset_index(drop=True)
 
-        start_idx = int(start_seconds * self.__fs__)
-        stop_idx = int(stop_seconds * self.__fs__)
-        for name in self.chInfo['Name'].values:
-            self.data[sseg][name] = self.data[sseg][name].iloc[start_idx:stop_idx].reset_index(
-                drop=True)
-        self.segInfo.iloc[sseg]['Start time'] = start_time
-        self.segInfo.iloc[sseg]['Stop time'] = stop_time
-        self.segInfo.iloc[sseg]['N sample'] = stop_idx - start_idx
+        sampNum = self.data[sseg].shape[0]
+
+        self.segInfo.loc['Seg{0:2d}'.format(
+            sseg),'Start'] = moveTimestr(self.segInfo['Start'].values[0], start)
+        self.segInfo.loc['Seg{0:2d}'.format(
+            sseg),'Stop'] = moveTimestr(self.segInfo['Start'].values[0], stop)
+        self.segInfo.loc['Seg{0:2d}'.format(
+            sseg),'Duration'] = '{0:8.1f}s'.format((sampNum - 1) / self.__fs__)
+        self.segInfo.loc['Seg{0:2d}'.format(
+            sseg),'N sample'] = sampNum
         self.updateST(sseg=sseg)
-        logger.info(f'Cut time series from {start_time} to {stop_time}')
+        logger.info('Cut time series from {0:5.2f}s to {1:5.2f}s'.format(
+                start, stop))
 
     def move_data(self, chName, point_of_move, sseg=0):
         """
@@ -2335,7 +2372,7 @@ class PyDAS:
         else:
             logger.error(f'ERROR! {chName:8s} not found.')
 
-    def read_motion(self, motionfname, alignAccName=None, alignMethod='time', zerofilename='', lowpassfilter=-1, rotation=True, NameList=['Tanker', 'Platform']):
+    def read_motion(self, motionfname, alignAccName=None, alignMethod='acc', zerofilename='', lowpassfilter=-1, rotation=True, NameList=['Platform']):
         """
         Read motion data and add as channels.
         
@@ -2354,7 +2391,7 @@ class PyDAS:
         rotation : bool, optional
             Whether to apply rotation, default is True
         NameList : list of str, optional
-            List of object names to process, default is ['Tanker', 'Platform']
+            List of object names to process, default is ['Platform']
             
         Notes:
         ------
@@ -2369,7 +2406,6 @@ class PyDAS:
                 try:
                     f.seek(0)
                     lines = f.readlines()
-                    
                     # Parse header information
                     try:
                         n_body = int(lines[2].replace('\n', '').split('\t')[1])
@@ -2404,7 +2440,7 @@ class PyDAS:
                         )
                         Zeromean = ZeromotionDataRaw.mean(axis=0)
                         Zeromean[3] = 0  # Don't apply zero correction to yaw
-                        
+                        logger.info(f"Zero reference data: {Zeromean}")
                         # Read motion data and apply zero correction
                         motionDataRawList.append(
                             np.genfromtxt(
@@ -2475,9 +2511,9 @@ class PyDAS:
             if alignMethod == 'acc':
                 try:
                     # Calculate acceleration from heave motion
-                    heave = self.apply_lowpass_filter('DP_vessel.heave', replace=False, returnValue=True)
+                    heave = self.apply_lowpass_filter(NameList[0]+'.Heave', replace=False, returnValue=True)
                     vz = diff1d(heave/100, 1 / self.__fs__)
-                    az = diff1d(vz, 1 / self.__fs__)*100
+                    az = diff1d(vz, 1 / self.__fs__) * -1
                     n_sample = self.segInfo.iloc[0]['N sample']
                     
                     # Find correlation with acceleration channel
@@ -4020,16 +4056,11 @@ class PyDAS:
         
         # 创建TimeSeries对象
         # TimeSeries构造函数需要data和args参数，其中args是时间向量
-        ts = TimeSeries(data_scaled, T, 
-                       title=f"Full scale {channel_name}",
-                       xlab="Time (s)", 
-                       ylab=f"{channel_name} [{trans_temp[0]}]")
+        ts = TimeSeries(data_scaled,T)
         
         return ts
 
-    def spectral_analysis(self, channel_name, method='cov', L=1024, plot=False, title=None,
-                             show=True, save_path=None, use_plotly=True, save_html=None,
-                             fullscale=False, lam=None, rho=1.025, g=9.807, freq_range=(0, 2)):
+    def spectral_analysis(self, channel_name, method='cov', L=1024, plot=False, title=None, show=True, save_path=None, use_plotly=True, save_html=None,fullscale=False, lam=None, rho=1.025, g=9.807, freq_range=(0, 2)):
         """
         Perform spectral analysis on a single channel and return a spectral data object
         
@@ -4132,11 +4163,8 @@ class PyDAS:
             
             # Create TimeSeries object
             try:
-                unit = self.chInfo.loc[self.chInfo['Name'] == channel_name, 'Unit'].values[0]
-                ts = TimeSeries(data, t, 
-                               title=f"Channel {channel_name}",
-                               xlab="Time (s)", 
-                               ylab=f"{channel_name} [{unit}]")
+                # 修改TimeSeries初始化方式，遵循其定义
+                ts = TimeSeries(data, t)
                 
                 # Calculate spectrum
                 spec = ts.tospecdata(L=L, method=method)
