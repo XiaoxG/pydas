@@ -11,7 +11,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="pydas",
-    version="1.0.2",
+    version="1.0.3",
     author="SJTU/SKLOE",
     author_email="xiaoxguo@sjtu.edu.cn",
     description="Python data analysis system, used for processing and analyzing large time series data @ SJTU/SKLOE",

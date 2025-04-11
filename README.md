@@ -369,8 +369,8 @@ If you use PyDAS in your research, please cite:
   author = {Guo, Xiaoxiang},
   title = {PyDAS: Python Data Analysis System},
   url = {https://gitee.com/xiaoxianguo/pydas},
-  version = {1.0.2},
-  year = {2024},
+  version = {1.0.3},
+  year = {2025},
 }
 ```
 

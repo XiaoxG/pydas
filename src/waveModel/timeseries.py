@@ -12,7 +12,9 @@ from scipy.signal.windows import parzen
 
 from waveModel.core import nextpow2
 from waveModel.covdata import CovarianceEstimator
-
+from waveModel.specdata import SpecData1D
+from waveModel.dataframe import PlotData
+from waveModel.plotbackend import plotbackend as plt
 
 def array2timeseries(x):
     """
@@ -21,7 +23,7 @@ def array2timeseries(x):
     """
     return TimeSeries(x[:, 1::], x[:, 0].ravel())
 
-class TimeSeries():
+class TimeSeries(PlotData):
     '''
     Container class for 1D TimeSeries data objects in WAFO
     Member variables
@@ -208,59 +210,213 @@ class TimeSeries():
         "Stochastic Processes", HOLDEN-DAY,
         pp 66--103
         '''
-        # 延迟导入SpecData1D，避免循环导入
-        from waveModel.specdata import SpecData1D
-        
-        x = atleast_1d(self.data).ravel()
-        dt = self._check_dt(dt=None)
 
-        if L is None:
-            acf = self.tocovdata(lag=300, dt=dt)
-            L = min(300, acf.get_l2spike()[0])
+        nugget = 1e-12
+        rate = 2  # interpolationrate for frequency
+        dt = self.sampling_period()
 
-        if method.startswith('cov'):
-            acf = self.tocovdata(lag=L, dt=dt)
-            acf.data = acf.data * parzen(2 * L + 1)
-            spec = acf.tospecdata(ftype=ftype)
-        else:  # method='psd'
-            if x.ndim != 1:
-                raise ValueError('Input array must be one dimensional!')
+        yy = self.data.ravel()
+        yy = detrend(yy) if hasattr(detrend, '__call__') else yy
+        n = len(yy)
 
-            n = len(x)
+        estimate_L = L is None
+        if method == 'cov' or estimate_L:
+            tsy = TimeSeries(yy, self.args)
+            R = tsy.tocovdata(lag=L, window=window)
+            L = len(R.data) - 1
+            if method == 'cov':
+                # add a nugget effect to ensure that round off errors
+                # do not result in negative spectral estimates
+                spec = R.tospecdata(rate=rate, nugget=nugget)
+        L = min(L, n - 1)
+        if method == 'psd':
             nfft = 2 ** nextpow2(L)
-            nfft = min(nfft, n)
-            if noverlap is None:
-                noverlap = 0
-            # Fs=1./dt
-            Fs = 1
-            freq, specdens = welch(
-                x * dt, fs=Fs, window=window, nperseg=nfft,
-                noverlap=noverlap, nfft=None, detrend=detrend,
-                return_onesided=True, scaling='density', axis=-1)
+            pad_to = rate * nfft  # Interpolate the spectrum with rate
+            f, S = welch(yy, fs=1.0 / dt, window=window, nperseg=nfft,
+                         noverlap=noverlap, nfft=pad_to, detrend=detrend,
+                         return_onesided=True, scaling='density', axis=-1)
+#             S, f = psd(yy, Fs=1. / dt, NFFT=nfft, detrend=detrend,
+#                        window=win, noverlap=noverlap, pad_to=pad_to,
+#                        scale_by_freq=True)
+            fact = 2.0 * pi
+            w = fact * f
+            spec = SpecData1D(S / fact, w)
+        elif method == 'cov':
+            pass
+        else:
+            raise ValueError('Unknown method (%s)' % method)
 
-            if ftype == 'w':
-                freq1 = freq * (2 * pi)
-                specdens = specdens / (2 * pi)
-            else:
-                freq1 = freq
-
-            specdens = specdens * 2  # Make it one-sided
-            spec = SpecData1D(specdens.ravel(), freq1.ravel())
-            spec.freqtype = ftype
-
-        # spec.name = 'S(w)'
-        spec.tr = None
-
-        # The confidence interval method:
-        spec.Bw, spec.dof = self._get_bandwidth_and_dof(window, n, L, dt,
-                                                        ftype=ftype)
-        spec.CI = None
-        spec.alpha = alpha
+        Be, _ = self._get_bandwidth_and_dof(window, n, L, dt, ftype)
+        spec.Bw = Be
         spec.L = L
-
+        spec.norm = False
+        spec.note = 'method=%s' % method
         return spec
 
-    def _check_dt(self, dt=None):
-        if dt is None:
-            dt = self.sampling_period()
-        return dt
+    # def plot_wave(self, sym1='k.', ts=None, sym2='k+', nfig=None, nsub=None, sigma=None, vfact=3):
+    #     '''
+    #     Plots the surface elevation of timeseries.
+    #     Parameters
+    #     ----------
+    #     sym1, sym2 : string
+    #         plot symbol and color for data and ts, respectively
+    #                   (see PLOT)  (default 'k.' and 'k+')
+    #     ts : TimeSeries or TurningPoints object
+    #         to overplot data. default zero-separated troughs and crests.
+    #     nsub : scalar integer
+    #         Number of subplots in each figure. By default nsub is such that
+    #         there are about 20 mean down crossing waves in each subplot.
+    #         If nfig is not given and nsub is larger than 6 then nsub is
+    #         changed to nsub=min(6,ceil(nsub/nfig))
+    #     nfig : scalar integer
+    #         Number of figures. By default nfig=ceil(Nsub/6).
+    #     sigma : real scalar
+    #         standard deviation of data.
+    #     vfact : real scalar
+    #         how large in stdev the vertical scale should be (default 3)
+    #     Examples
+    #     --------
+    #     Plot x1 with red lines and mark troughs and crests with blue circles.
+    #     >>> import wafo
+    #     >>> x = wafo.data.sea()
+    #     >>> ts150 = wafo.objects.mat2timeseries(x[:150,:])
+    #     >>> h = ts150.plot_wave('r-', sym2='bo')
+    #     See also
+    #     --------
+    #     findtc, plot
+    #     '''
+
+    #     nw = 20
+    #     tn = self.args
+    #     xn = self.data.ravel()
+    #     indmiss = isnan(xn)  # indices to missing points
+    #     indg = where(1 - indmiss)[0]
+    #     if ts is None:
+    #         tc_ix = findtc(xn[indg], 0, 'tw')[0]
+    #         xn2 = xn[tc_ix]
+    #         tn2 = tn[tc_ix]
+    #     else:
+    #         xn2 = ts.data
+    #         tn2 = ts.args
+
+    #     if sigma is None:
+    #         sigma = xn[indg].std()
+
+    #     if nsub is None:
+    #         # about Nw mdc waves in each plot
+    #         nsub = int(len(xn2) / (2 * nw)) + 1
+    #     if nfig is None:
+    #         nfig = int(ceil(nsub / 6))
+    #         nsub = min(6, int(ceil(nsub / nfig)))
+
+    #     n = len(xn)
+    #     Ns = int(n / (nfig * nsub))
+    #     ind = r_[0:Ns]
+
+    #     XlblTxt = 'Time [sec]'
+    #     dT = 1
+    #     timespan = tn[ind[-1]] - tn[ind[0]]
+    #     if abs(timespan) > 18000:  # more than 5 hours
+    #         dT = 1 / (60 * 60)
+    #         XlblTxt = 'Time (hours)'
+    #     elif abs(timespan) > 300:  # more than 5 minutes
+    #         dT = 1 / 60
+    #         XlblTxt = 'Time (minutes)'
+
+    #     if np.max(abs(xn[indg])) > 5 * sigma:
+    #         XlblTxt = XlblTxt + ' (Spurious data since max > 5 std.)'
+
+    #     plot = plt.plot
+    #     subplot = plt.subplot
+    #     figs = []
+    #     for unused_iz in range(nfig):
+    #         figs.append(plt.figure())
+    #         plt.title('Surface elevation from mean water level (MWL).')
+    #         for ix in range(nsub):
+    #             if nsub > 1:
+    #                 subplot(nsub, 1, ix + 1)
+    #             h_scale = array([tn[ind[0]], tn[ind[-1]]])
+    #             ind2 = where((h_scale[0] <= tn2) & (tn2 <= h_scale[1]))[0]
+    #             plot(tn[ind] * dT, xn[ind], sym1)
+    #             if len(ind2) > 0:
+    #                 plot(tn2[ind2] * dT, xn2[ind2], sym2)
+    #             plot(h_scale * dT, [0, 0], 'k-')
+    #             # plt.axis([h_scale*dT, v_scale])
+    #             for iy in [-2, 2]:
+    #                 plot(h_scale * dT, iy * sigma * ones(2), ':')
+    #             ind = ind + Ns
+    #         plt.xlabel(XlblTxt)
+
+    #     return figs
+
+    # def plot_sp_wave(self, wave_idx_, *args, **kwds):
+    #     """
+    #     Plot specified wave(s) from timeseries
+    #     Parameters
+    #     ----------
+    #     wave_idx : integer vector
+    #         of indices to waves we want to plot, i.e., wave numbers.
+    #     tz_idx : integer vector
+    #         of indices to the beginning, middle and end of
+    #         defining wave, i.e. for zero-downcrossing waves, indices to
+    #         zerocrossings (default trough2trough wave)
+    #     Examples
+    #     --------
+    #     Plot waves nr. 6,7,8 and waves nr. 12,13,...,17
+    #     >>> import wafo
+    #     >>> x = wafo.data.sea()
+    #     >>> ts = wafo.objects.mat2timeseries(x[0:500,...])
+    #     >>> h = ts.plot_sp_wave(np.r_[6:9,12:18])
+    #     See also
+    #     --------
+    #     plot_wave, findtc
+    #     """
+    #     wave_idx = atleast_1d(wave_idx_).flatten()
+    #     tz_idx = kwds.pop('tz_idx', None)
+    #     if tz_idx is None:
+    #         # finding trough to trough waves
+    #         unused_tc_ind, tz_idx = findtc(self.data, 0, 'tw')
+
+    #     dw = nonzero(abs(diff(wave_idx)) > 1)[0]
+    #     Nsub = dw.size + 1
+    #     Nwp = zeros(Nsub, dtype=int)
+    #     if Nsub > 1:
+    #         dw = dw + 1
+    #         Nwp[Nsub - 1] = wave_idx[-1] - wave_idx[dw[-1]] + 1
+    #         wave_idx[dw[-1] + 1:] = -2
+    #         for ix in range(Nsub - 2, 1, -2):
+    #             # of waves pr subplot
+    #             Nwp[ix] = wave_idx[dw[ix] - 1] - wave_idx[dw[ix - 1]] + 1
+    #             wave_idx[dw[ix - 1] + 1:dw[ix]] = -2
+
+    #         Nwp[0] = wave_idx[dw[0] - 1] - wave_idx[0] + 1
+    #         wave_idx[1:dw[0]] = -2
+    #         wave_idx = wave_idx[wave_idx > -1]
+    #     else:
+    #         Nwp[0] = wave_idx[-1] - wave_idx[0] + 1
+
+    #     Nsub = min(6, Nsub)
+    #     Nfig = int(ceil(Nsub / 6))
+    #     Nsub = min(6, int(ceil(Nsub / Nfig)))
+    #     figs = []
+    #     for unused_iy in range(Nfig):
+    #         figs.append(plt.figure())
+    #         for ix in range(Nsub):
+    #             plt.subplot(Nsub, 1, mod(ix, Nsub) + 1)
+    #             ind = r_[tz_idx[2 * wave_idx[ix] - 1]:tz_idx[
+    #                 2 * wave_idx[ix] + 2 * Nwp[ix] - 1]]
+    #             # indices to wave
+    #             plt.plot(self.args[ind], self.data[ind], *args, **kwds)
+    #             plt.hold('on')
+    #             xi = [self.args[ind[0]], self.args[ind[-1]]]
+    #             plt.plot(xi, [0, 0])
+
+    #             if Nwp[ix] == 1:
+    #                 plt.ylabel('Wave %d' % wave_idx[ix])
+    #             else:
+    #                 plt.ylabel(
+    #                     'Wave %d - %d' % (wave_idx[ix],
+    #                                       wave_idx[ix] + Nwp[ix] - 1))
+    #         plt.xlabel('Time [sec]')
+    #         # wafostamp
+    #     return figs

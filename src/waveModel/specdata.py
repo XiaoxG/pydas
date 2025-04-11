@@ -1,6 +1,7 @@
-from waveModel.core import now, nextpow2, discretize, sub_dict_select
+from waveModel.core import ecross, now, nextpow2, discretize
 
 import warnings
+import os
 import numpy as np
 from numpy import (pi, inf, zeros, ones, where, nonzero,
                    flatnonzero, ceil, sqrt, exp, log, arctan2,
@@ -10,13 +11,16 @@ from numpy import (pi, inf, zeros, ones, where, nonzero,
                    arange, array, nan, newaxis, sign, meshgrid)
 from scipy.integrate import simps, trapz
 import scipy.interpolate as interpolate
-from scipy.interpolate.interpolate import interp2d
+from scipy.interpolate.interpolate import interp1d, interp2d
 from numpy.fft import fft
-from waveModel.misc import (cart2polar, polar2cart, gravity as _gravity)
+from waveModel.plotbackend import plotbackend as plt
 from waveModel.covdata import CovData1D
-
+from waveModel.dispersion_relation import k2w, w2k
+from waveModel.dataframe import PlotData
+from waveModel.misc import (cart2polar, polar2cart, sub_dict_select, gravity as _gravity)
 _EPS = np.finfo(float).eps
 _TINY = np.finfo(float).tiny
+
 
 
 def qtf(w, h=inf, g=9.81, method='winterstein', rtol=1e-7, atol=0):
@@ -94,8 +98,20 @@ def qtf(w, h=inf, g=9.81, method='winterstein', rtol=1e-7, atol=0):
     'On the skewness of random surface waves'
     In proceedings of the 2nd ISOPE Conference, San Francisco, 14-19 june.
     """
-    # 在函数内部导入需要的函数
-    from waveModel.wavemodels import k2w, w2k
+#     >>> hs3, hd3, hdi3 = qtf(w, h=200, g=9.81, method='winterstein')
+#     >>> hs3
+#
+#     >>> hd3
+#
+#     >>> np.allclose(hs3, [[ 0.        ,  0.00283158,  0.01132631,  0.0254842 ],
+#     ...                  [ 0.00283158,  0.00566316,  0.01415789,  0.02831578],
+#     ...                  [ 0.01132631,  0.01415789,  0.02265262,  0.03681051],
+#     ...                  [ 0.0254842 ,  0.02831578,  0.03681051,  0.0509684 ]])
+#
+#     >>> np.allclose(hd3, [[-0.        , -0.00283158, -0.01132631, -0.0254842 ],
+#     ...                  [-0.00283158, -0.        , -0.00849473, -0.02265262],
+#     ...                  [-0.01132631, -0.00849473, -0.        , -0.01415789],
+#     ...                  [-0.0254842 , -0.02265262, -0.01415789, -0.        ]])
 
     w = atleast_1d(w)
     num_w = w.size
@@ -108,7 +124,7 @@ def qtf(w, h=inf, g=9.81, method='winterstein', rtol=1e-7, atol=0):
         h_dii = zeros(num_w)
         return h_s, h_d, h_dii
 
-    w1 = w + _EPS ** (1. / 10) * (np.sign(w) * np.int_(np.abs(w) < _EPS) + np.int_(w == 0))
+    w1 = w + _TINY ** (1. / 10) * (np.sign(w) * np.int_(np.abs(w) < _EPS) + np.int_(w == 0))
 
     w = w1
     # k_w += _TINY ** (1./3) * (np.sign(k_w) * np.int_(np.abs(k_w) < _EPS) + np.int_(k_w==0))
@@ -237,7 +253,7 @@ def _set_seed(iseed):
         except (KeyError, TypeError):
             random.seed(iseed)
 
-class SpecData1D():
+class SpecData1D(PlotData):
     """
     Container class for 1D spectrum data objects in WAFO
     Member variables
@@ -1436,7 +1452,7 @@ class SpecData1D():
         self.labels.zlab = labels[2]
 
 
-class SpecData2D():
+class SpecData2D(PlotData):
 
     """ Container class for 2D spectrum data objects in WAFO
 

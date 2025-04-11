@@ -50,7 +50,7 @@ Function Categories:
    - plot_channel: Plot channel data with interactive features and performance optimization
    - plot_histogram: Generate histograms with statistics and Gaussian fitting capabilities
    - plot_xy: Create XY scatter plots with density visualization, downsampling, and linear regression
-   - spectral_analysis: Perform spectral analysis on channels with customizable parameters
+   - spectral_analysis: Perform spectral analysis on channels with customizable parameters and fullscale conversion
 
 5. Data Import
    - read_waveCal: Read wave calibration data
@@ -59,34 +59,44 @@ Function Categories:
 6. Data Conversion
    - fix_unit: Fix channel unit
    - to_fullscale: Convert model scale data to prototype scale
+   - channel2fullscale: Convert individual channel to fullscale for spectral analysis
 
 7. Data Update
    - updateST: Update statistical information
    - updateChN: Update channel count
 
 8. Global Utility Functions
-   - diff1d: Calculate derivative of one-dimensional array
-   - data_change_fs: Change data sampling frequency
+   - diff1d: Calculate derivative of one-dimensional array with adaptive optimization
+   - data_change_fs: Change data sampling frequency with optimized implementation
 
 Performance Optimizations:
 ------------------------
 1. Numba Acceleration
    - JIT compilation for compute-intensive functions
+   - Parallel processing for large datasets
+   - Adaptive algorithm selection based on data size
    - Applied to derivative calculation and data resampling
 
 2. Vectorized Operations
    - Pandas vectorized operations for statistics
    - Numpy vectorized operations for dataset processing
+   - Batch processing for large datasets
 
 3. Cache Optimization
    - Cache for unit conversion calculations
    - Pre-calculation of unique unit conversions
+   - Memory-mapped file reading for large datasets
 
-4. Other Optimizations
+4. Memory Management
+   - Efficient data loading with memory mapping
+   - Chunk-based processing for huge datasets
    - Reduced data copying and conversion
-   - Efficient algorithms and data structures
+
+5. Visualization Optimizations
    - Automatic downsampling for large datasets
    - WebGL rendering for interactive visualization
+   - Adaptive sampling algorithms (LTTB)
+   - Memory-efficient plotting modes
 
 Dependencies:
 ------------
@@ -98,8 +108,8 @@ Dependencies:
 - matplotlib: Static visualization and fallback rendering
 
 Author: Xiaoxian Guo
-Date: 2024-03-20
-Version: 1.0.1
+Date: 2025-04-11
+Version: 1.0.3
 """
 import re
 import sys
@@ -4032,10 +4042,20 @@ class PyDAS:
         
         # Get conversion factors
         trans_temp = self._findtrans(unit, transDict)
-        C1 = trans_temp[1][0]  # CoeffUnit
-        C2 = rho ** trans_temp[1][1]  # CoeffRho
-        C3 = lam ** trans_temp[1][2]  # CoeffLam
-        coeff = C1 * C2 * C3
+        logger.debug(f"Conversion result for unit {unit}: {trans_temp}")
+        
+        # 确保系数是浮点数
+        try:
+            C1 = float(trans_temp[1][0])  # CoeffUnit
+            C2 = float(rho ** trans_temp[1][1])  # CoeffRho
+            C3 = float(lam ** trans_temp[1][2])  # CoeffLam
+            coeff = C1 * C2 * C3
+            logger.debug(f"Conversion coefficients: C1={C1}, C2={C2}, C3={C3}, total={coeff}")
+        except Exception as e:
+            logger.error(f"Error converting coefficients: {str(e)}")
+            # 使用默认值
+            coeff = 1.0
+            logger.warning(f"Using default coefficient value: {coeff}")
         
         # Calculate time array based on the scaling
         fs_scaled = self.__fs__ / np.sqrt(lam)
@@ -4045,20 +4065,50 @@ class PyDAS:
         if self.__segN__ > 1:
             logger.info(f"Multiple segments found. Only converting first segment.")
             
-        # Extract original data
-        data = self.data[idx1][channel_name].copy()
-        
-        # Apply conversion coefficient
-        data_scaled = data * coeff
+        # Extract original data and ensure it's a float64 numpy array
+        try:
+            # 确保获取的是numpy数组而不是pandas Series
+            data_raw = self.data[idx1][channel_name]
+            if hasattr(data_raw, 'values'):
+                data = data_raw.values
+            else:
+                data = np.array(data_raw)
+                
+            # 检查数据类型并转换为float64
+            if not np.issubdtype(data.dtype, np.floating):
+                logger.debug(f"Converting data from {data.dtype} to float64")
+                data = data.astype(np.float64)
+            else:
+                data = data.copy()
+                
+            # 检查数据是否有nan或inf
+            if np.any(np.isnan(data)) or np.any(np.isinf(data)):
+                logger.warning(f"Data contains NaN or Inf values")
+                
+            logger.debug(f"Data shape: {data.shape}, type: {data.dtype}")
+            
+            # Apply conversion coefficient
+            data_scaled = data * coeff
+            logger.debug(f"Scaled data range: {np.min(data_scaled)} to {np.max(data_scaled)}")
+            
+        except Exception as e:
+            logger.error(f"Error processing data in channel2fullscale: {str(e)}")
+            return None
         
         # Create time array
         T = np.arange(0, len(data)) / fs_scaled
         
         # 创建TimeSeries对象
-        # TimeSeries构造函数需要data和args参数，其中args是时间向量
-        ts = TimeSeries(data_scaled,T)
-        
-        return ts
+        try:
+            # 确保单位名称是字符串
+            unit_name = str(trans_temp[0]) if trans_temp and trans_temp[0] is not None else unit
+            
+            # TimeSeries构造函数需要data和args参数，其中args是时间向量
+            ts = TimeSeries(data_scaled, T)
+            return ts
+        except Exception as e:
+            logger.error(f"Error creating TimeSeries object: {str(e)}")
+            return None
 
     def spectral_analysis(self, channel_name, method='cov', L=1024, plot=False, title=None, show=True, save_path=None, use_plotly=True, save_html=None,fullscale=False, lam=None, rho=1.025, g=9.807, freq_range=(0, 2)):
         """
@@ -4144,9 +4194,32 @@ class PyDAS:
                 if ts is None:
                     logger.error(f"Full scale conversion failed for channel: {channel_name}")
                     return None
-                    
+                
+                # 检查TimeSeries对象数据，确认其类型
+                logger.debug(f"TimeSeries data type: {type(ts.data)}, shape: {ts.data.shape if hasattr(ts.data, 'shape') else 'unknown'}")
+                logger.debug(f"TimeSeries args type: {type(ts.args)}, shape: {ts.args.shape if hasattr(ts.args, 'shape') else 'unknown'}")
+                
+                # 检查数据是否为浮点数
+                if hasattr(ts.data, 'dtype') and not np.issubdtype(ts.data.dtype, np.floating):
+                    logger.warning(f"TimeSeries data is not floating point, converting from {ts.data.dtype}")
+                    ts.data = np.array(ts.data, dtype=np.float64)
+                
                 # Calculate spectrum
-                spec = ts.tospecdata(L=L, method=method)
+                try:
+                    spec = ts.tospecdata(L=L, method=method)
+                except TypeError as te:
+                    logger.error(f"Type error in tospecdata: {str(te)}")
+                    # 尝试修复数据类型问题
+                    logger.debug("Attempting to fix data type issues...")
+                    if hasattr(ts, 'data'):
+                        ts.data = np.array(ts.data, dtype=np.float64)
+                    if hasattr(ts, 'args'):
+                        ts.args = np.array(ts.args, dtype=np.float64)
+                    # 再次尝试
+                    spec = ts.tospecdata(L=L, method=method)
+                except Exception as e:
+                    logger.error(f"Error in tospecdata: {str(e)}")
+                    raise
             except Exception as e:
                 logger.error(f"Full scale spectral analysis failed: {str(e)}")
                 return None
@@ -4155,7 +4228,7 @@ class PyDAS:
             sseg = 0
             
             # Get channel data
-            data = self.data[sseg][channel_name].values.copy()
+            data = self.data[sseg][channel_name].values.copy().astype(np.float64)
             
             # Create time vector (assuming equal sampling intervals)
             fs = self.__fs__
