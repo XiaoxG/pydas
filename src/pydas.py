@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 """
 PyDAS - Python Data Analysis System
@@ -126,6 +125,10 @@ import logging
 import warnings
 from waveModel.timeseries import TimeSeries
 import datetime
+from logger import logger, setup_logger, LOG_LEVELS  # 导入logger模块
+from utils import diff1d, data_change_fs  # 导入utils模块中的通用函数
+from output import write_data, export_to_dat, export_to_mat  # 导入output模块中的函数
+from plot import validate_channel, plot_channel, plot_histogram, plot_xy  # 导入plot模块中的函数
 
 # Import numba for acceleration
 try:
@@ -134,359 +137,6 @@ try:
 except ImportError:
     NUMBA_AVAILABLE = False
     print("Numba not available. Some functions will run slower.")
-
-# Initialize module-level logger
-logger = logging.getLogger(__name__)
-
-# 日志级别映射
-LOG_LEVELS = {
-    'debug': logging.DEBUG,
-    'info': logging.INFO,
-    'warning': logging.WARNING,
-    'error': logging.ERROR,
-    'critical': logging.CRITICAL
-}
-
-def diff1d(series, dx=1.0):
-    """
-    Calculate the derivative of a one-dimensional array with optimized performance.
-    
-    This function uses Numba JIT compilation for large arrays to improve performance.
-    For different array sizes, it automatically selects the most efficient implementation:
-    - Small arrays (< 1000): Standard numpy implementation
-    - Medium arrays (1000-10000): Basic Numba implementation
-    - Large arrays (10000-100000): Parallel Numba implementation
-    - Huge arrays (> 100000): Optimized parallel Numba implementation
-    
-    Parameters:
-    -----------
-    series : numpy.ndarray
-        Input array to calculate derivative
-    dx : float, optional
-        Time step, default is 1.0
-        
-    Returns:
-    --------
-    numpy.ndarray
-        Derivative array with the same length as input
-        
-    Notes:
-    ------
-    - Uses Numba JIT compilation for performance optimization
-    - Automatically handles different array sizes
-    - Maintains numerical accuracy for various input sizes
-    """
-    # Convert input to numpy array
-    series_array = np.asarray(series, dtype=np.float64)
-    
-    # Check input array size and select the most appropriate implementation
-    if len(series_array) <= 1:
-        return np.zeros_like(series_array)
-        
-    # If numba is available, use the accelerated version
-    if NUMBA_AVAILABLE:
-        # Select the appropriate numba optimized version
-        if len(series_array) > 10000000:  # Extremely large dataset
-            return _diff1d_numba_huge(series_array, dx)
-        elif len(series_array) > 1000000:  # Large dataset
-            return _diff1d_numba_large(series_array, dx)
-        else:  # Small to medium dataset
-            return _diff1d_numba(series_array, dx)
-    
-    # Original implementation (fallback if numba is not available)
-    n = len(series_array)
-    dy = np.zeros_like(series_array)
-    
-    if n <= 6:
-        # For very small arrays, use simple central difference
-        if n == 1:
-            return np.zeros_like(series_array)
-        elif n == 2:
-            dy[0] = (series_array[1] - series_array[0]) / dx
-            dy[1] = dy[0]
-            return dy
-
-# 使用numba加速的版本
-if NUMBA_AVAILABLE:
-    @jit(float64[:](float64[:], float64), nopython=True, parallel=True, fastmath=True, cache=True)
-    def _diff1d_numba(y, dx):
-        """
-        Numba-accelerated implementation of the derivative calculation.
-        
-        This function uses Numba JIT compilation to accelerate the derivative calculation
-        for medium-sized arrays.
-        """
-        n = len(y)
-        dy = np.zeros(n, dtype=np.float64)
-        
-        # Check if array is large enough
-        if n <= 5:
-            return dy
-        
-        # Forward difference (first point, 2nd order)
-        dy[0] = (-y[2] + 4 * y[1] - 3 * y[0]) / (2 * dx)
-        
-        # Forward difference (second point, 3rd order)
-        dy[1] = (-y[3] + 6 * y[2] - 3 * y[1] - 2 * y[0]) / (6 * dx)
-        
-        # Central difference (third point, 4th order)
-        dy[2] = (8 * (y[3] - y[1]) - (y[4] - y[0])) / (12 * dx)
-        
-        # Use prange for parallel processing of interior points
-        for i in prange(3, n - 3):
-            dy[i] = (45 * (y[i+1] - y[i-1]) - 9 * (y[i+2] - y[i-2]) + (y[i+3] - y[i-3])) / (60 * dx)
-        
-        # Central difference (third-to-last point, 4th order)
-        dy[n-3] = (8 * (y[n-2] - y[n-4]) - (y[n-1] - y[n-5])) / (12 * dx)
-        
-        # Backward difference (second-to-last point, 3rd order)
-        dy[n-2] = (2 * y[n-1] + 3 * y[n-2] - 6 * y[n-3] + y[n-4]) / (6 * dx)
-        
-        # Backward difference (last point, 2nd order)
-        dy[n-1] = (3 * y[n-1] - 4 * y[n-2] + y[n-3]) / (2 * dx)
-        
-        return dy
-    
-    # Optimized version for large data
-    @jit(float64[:](float64[:], float64), nopython=True, fastmath=True, cache=True)
-    def _diff1d_numba_large(y, dx):
-        """
-        Optimized implementation for large arrays.
-        
-        This function uses a simplified approach for large arrays to balance
-        accuracy and performance.
-        """
-        n = len(y)
-        dy = np.zeros(n, dtype=np.float64)
-        
-        # Handle boundary points
-        dy[0] = (-3 * y[0] + 4 * y[1] - y[2]) / (2 * dx)
-        dy[1] = (-2 * y[0] - 3 * y[1] + 6 * y[2] - y[3]) / (6 * dx)
-        dy[2] = (y[0] - 8 * y[1] + 8 * y[3] - y[4]) / (12 * dx)
-        
-        # Interior points using vectorized operations (more efficient)
-        # This loop will be automatically optimized in numba
-        for i in range(3, n - 3):
-            dy[i] = (y[i+1] - y[i-1]) / (2 * dx)
-        
-        dy[n-3] = (y[n-5] - 8 * y[n-3] + 8 * y[n-1]) / (12 * dx)
-        dy[n-2] = (y[n-4] - 6 * y[n-3] + 3 * y[n-2] + 2 * y[n-1]) / (6 * dx)
-        dy[n-1] = (y[n-3] - 4 * y[n-2] + 3 * y[n-1]) / (2 * dx)
-        
-        return dy
-    
-    # Optimized version for huge data using chunked processing
-    @jit(float64[:](float64[:], float64), nopython=True, parallel=True, fastmath=True, cache=True)
-    def _diff1d_numba_huge(y, dx):
-        """
-        Optimized implementation for extremely large arrays.
-        
-        This function uses chunked processing and parallel computation to handle
-        very large arrays efficiently.
-        """
-        n = len(y)
-        dy = np.zeros(n, dtype=np.float64)
-        
-        if n <= 1000000:  # For smaller arrays, use regular method
-            return _diff1d_numba_large(y, dx)
-        
-        # Handle boundary points (first 3 points)
-        dy[0] = (-3 * y[0] + 4 * y[1] - y[2]) / (2 * dx)
-        dy[1] = (-2 * y[0] - 3 * y[1] + 6 * y[2] - y[3]) / (6 * dx)
-        dy[2] = (y[0] - 8 * y[1] + 8 * y[3] - y[4]) / (12 * dx)
-        
-        # Handle boundary points (last 3 points)
-        dy[n-3] = (y[n-5] - 8 * y[n-3] + 8 * y[n-1]) / (12 * dx)
-        dy[n-2] = (y[n-4] - 6 * y[n-3] + 3 * y[n-2] + 2 * y[n-1]) / (6 * dx)
-        dy[n-1] = (y[n-3] - 4 * y[n-2] + 3 * y[n-1]) / (2 * dx)
-        
-        # Process interior points in chunks
-        chunk_size = 1000000  # Size per chunk
-        n_chunks = (n - 6 + chunk_size - 1) // chunk_size  # Round up to get number of chunks
-        
-        # Precompute coefficients
-        coef = 1.0 / (2.0 * dx)
-        
-        # Process each chunk in parallel
-        for chunk in prange(n_chunks):
-            start = 3 + chunk * chunk_size
-            end = min(n - 3, start + chunk_size)
-            
-            for i in range(start, end):
-                dy[i] = (y[i+1] - y[i-1]) * coef
-        
-        return dy
-
-def data_change_fs(series, fs, fs_new):
-    """
-    Change the sampling frequency of data using linear interpolation with optimized performance.
-    
-    This function provides multiple implementations for different data sizes:
-    - Small arrays: Standard scipy interpolation
-    - Medium arrays: Basic Numba implementation
-    - Large arrays: Parallel Numba implementation
-    - Huge arrays: Optimized parallel Numba implementation
-    
-    Parameters:
-    -----------
-    series : numpy.ndarray
-        Input time series data
-    fs : float
-        Original sampling frequency in Hz
-    fs_new : float
-        New sampling frequency in Hz
-        
-    Returns:
-    --------
-    numpy.ndarray
-        Resampled data at the new sampling frequency
-        
-    Notes:
-    ------
-    - Uses linear interpolation for resampling
-    - Automatically selects optimal implementation based on data size
-    - Maintains signal integrity during resampling
-    - Handles edge cases and potential extrapolation issues
-    """
-    # 检查输入数组大小，选择最合适的实现
-    series_array = np.asarray(series, dtype='float64')
-    
-    # 如果numba可用，使用加速版本
-    if NUMBA_AVAILABLE:
-        # 选择适合的numba优化版本
-        if len(series_array) > 10000000:  # 超大数据集
-            return _data_change_fs_numba_huge(series_array, fs, fs_new)
-        elif len(series_array) > 1000000:  # 大数据集
-            return _data_change_fs_numba_fast(series_array, fs, fs_new)
-        else:  # 中小型数据集
-            return _data_change_fs_numba(series_array, fs, fs_new)
-    else:
-        # 原始实现
-        # Calculate the total time duration of the original signal
-        total_time = 1 / fs * len(series)
-        
-        # Create time vectors for original and new sampling rates
-        # Note: Subtracting 5/fs_new to avoid potential extrapolation issues
-        x_new = np.arange(0, total_time - 5 / fs_new, 1 / fs_new)
-        x_series = np.arange(0, total_time, 1 / fs)
-        
-        # Ensure x_series matches the length of the input series
-        x_series = x_series[:len(series)]
-        
-        # Create interpolation function and apply it
-        series_interp_func = interpolate.interp1d(
-            x_series, series, kind='linear', axis=0, fill_value=(0, 0))
-        series_interp = series_interp_func(x_new)
-        
-        return series_interp
-
-# 使用numba加速的版本
-if NUMBA_AVAILABLE:
-    @jit(float64[:](float64[:], float64, float64), nopython=True, fastmath=True, cache=True)
-    def _data_change_fs_numba(series, fs, fs_new):
-        """Numba加速版本的data_change_fs函数"""
-        # 计算原始信号的总时长
-        total_time = 1 / fs * len(series)
-        
-        # 创建原始和新的时间向量
-        x_new = np.arange(0, total_time - 5 / fs_new, 1 / fs_new)
-        x_series = np.arange(0, total_time, 1 / fs)
-        
-        # 确保x_series与输入序列长度匹配
-        if len(x_series) > len(series):
-            x_series = x_series[:len(series)]
-        
-        # 使用numpy的interp函数进行插值
-        return np.interp(x_new, x_series, series)
-    
-    @jit(float64[:](float64[:], float64, float64), nopython=True, fastmath=True, parallel=True, cache=True)
-    def _data_change_fs_numba_fast(series, fs, fs_new):
-        """针对大型数据集优化的data_change_fs函数"""
-        # 由于大数据集上直接使用interp可能占用大量内存，这里使用分块处理方法
-        # 计算原始信号的总时长
-        total_time = 1 / fs * len(series)
-        
-        # 创建新的时间向量
-        x_new = np.arange(0, total_time - 5 / fs_new, 1 / fs_new)
-        x_series = np.arange(0, total_time, 1 / fs)
-        
-        # 确保x_series与输入序列长度匹配
-        if len(x_series) > len(series):
-            x_series = x_series[:len(series)]
-        
-        # 创建结果数组
-        result = np.zeros(len(x_new))
-        
-        # 计算转换比例
-        ratio = fs / fs_new
-        
-        # 对于每个目标时间点，找到最近的两个源时间点并进行线性插值
-        for i in range(len(x_new)):
-            # 找到x_new[i]对应的在原数组中的位置（非整数）
-            pos = x_new[i] * fs
-            
-            # 找到左右两个整数索引
-            pos_left = int(pos)
-            pos_right = pos_left + 1
-            
-            # 确保索引在有效范围内
-            if pos_right >= len(series):
-                pos_right = len(series) - 1
-            
-            # 计算插值权重
-            weight_right = pos - pos_left
-            weight_left = 1.0 - weight_right
-            
-            # 线性插值
-            if pos_left < len(series):
-                result[i] = weight_left * series[pos_left] + weight_right * series[pos_right]
-            
-        return result
-        
-    @jit(float64[:](float64[:], float64, float64), nopython=True, parallel=True, fastmath=True, cache=True)
-    def _data_change_fs_numba_huge(series, fs, fs_new):
-        """针对超大型数据集优化的data_change_fs函数，使用分块并行处理"""
-        # 计算原始信号的总时长
-        total_time = 1 / fs * len(series)
-        
-        # 创建新的时间向量
-        x_new = np.arange(0, total_time - 5 / fs_new, 1 / fs_new)
-        
-        # 创建结果数组
-        result = np.zeros(len(x_new))
-        
-        # 分块处理
-        chunk_size = 1000000  # 每块大小
-        n_chunks = (len(x_new) + chunk_size - 1) // chunk_size  # 向上取整得到块数
-        
-        # 并行处理每个块
-        for chunk in prange(n_chunks):
-            start = chunk * chunk_size
-            end = min(start + chunk_size, len(x_new))
-            
-            # 处理当前块
-            for i in range(start, end):
-                # 找到x_new[i]对应的在原数组中的位置（非整数）
-                pos = x_new[i] * fs
-                
-                # 找到左右两个整数索引
-                pos_left = int(pos)
-                pos_right = pos_left + 1
-                
-                # 确保索引在有效范围内
-                if pos_right >= len(series):
-                    pos_right = len(series) - 1
-                
-                # 计算插值权重
-                weight_right = pos - pos_left
-                weight_left = 1.0 - weight_right
-                
-                # 线性插值
-                if pos_left < len(series):
-                    result[i] = weight_left * series[pos_left] + weight_right * series[pos_right]
-        
-        return result
-
 
 class PyDAS:
     """
@@ -529,7 +179,8 @@ class PyDAS:
         - Calculates basic statistics for each channel
         """
         # Configure logger
-        self.set_logger(log_level)
+        # self.set_logger(log_level)  # 使用新的setup_logger函数
+        setup_logger(log_level)
         
         # Initialize basic properties
         self.__lam__ = lam
@@ -560,42 +211,6 @@ class PyDAS:
             self.chInfo = pd.DataFrame(columns=['Name', 'Unit'])
             self.data = {}
             logger.info("Created empty PyDAS object. Use load() method to read data or set data manually.")
-
-    def set_logger(self, level='info'):
-        """
-        Configure the logger for the PyDAS class.
-        
-        Parameters:
-        -----------
-        level : str, optional
-            Logging level ('debug', 'info', 'warning', 'error', 'critical'), default is 'info'
-        
-        Returns:
-        --------
-        None
-        
-        Notes:
-        ------
-        - Sets the logging level for the PyDAS logger
-        - Available levels: 'debug', 'info', 'warning', 'error', 'critical'
-        """
-        level = level.lower()
-        if level not in LOG_LEVELS:
-            level = 'info'
-            
-        # Set the logger level
-        log_level = LOG_LEVELS[level]
-        logger.setLevel(log_level)
-        
-        # Add handler if needed
-        if not logger.handlers:
-            # Avoid adding handlers multiple times
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-            
-        logger.info(f"Logger level set to: {level.upper()}")
 
     def __read__(self, sseg):
         """
@@ -829,118 +444,45 @@ class PyDAS:
         ------
         This method will automatically append '.out' extension if not provided.
         """
-        # Ensure filename has .out extension
-        if not filename.endswith('.out'):
-            filename += '.out'
+        write_data(self, filename, sseg, ch)
 
-        # Determine which segments to write
-        if sseg == 'all':
-            sseg = list(range(self.__segN__))
-        elif isinstance(sseg, int):
-            sseg = [sseg]
-        else:
-            logger.warning("Unsupported segment number, using 'all'.")
-            sseg = list(range(self.__segN__))
-
-        logger.info(f'Saving segment(s) No. {sseg} to file {filename}')
-
-        with open(filename, 'wb') as fOut:
-            # Write file header (256 bytes)
-            datemmdd = self.__date__.split('-')
+    def to_dat(self, Time=True, sseg='all'):
+        """
+        Export data to DAT file format.
+        
+        Parameters:
+        -----------
+        Time : bool, optional
+            If True, include time column in the output, default is True
+        sseg : int or 'all', optional
+            Segment(s) to export, default is 'all'
             
-            # Pack header information
-            buf = struct.pack('=hhlhh',
-                              -2,                # File format version
-                              self.__chN__,      # Number of channels
-                              0x0d,              # Reserved
-                              self.__fs__,       # Sampling frequency
-                              len(sseg))         # Number of segments
+        Notes:
+        ------
+        The output file will be named based on the original filename with
+        segment number and scale (model or full) appended.
+        """
+        export_to_dat(self, Time, sseg)
+
+    def to_mat(self, sseg=0):
+        """
+        Export data to MATLAB MAT file format.
+        
+        Parameters:
+        -----------
+        sseg : int, optional
+            Segment index to export, default is 0
             
-            # Pack date and description
-            buf += struct.pack('2s2s240s',
-                               datemmdd[0].encode('utf-8'),
-                               datemmdd[1].encode('utf-8'),
-                               self.__desc__.encode('utf-8')).replace(b'\x00', b' ')
+        Returns:
+        --------
+        bool
+            True if export was successful, False otherwise
             
-            # Write header
-            if fOut.write(buf) != 256:
-                logger.error("Error when saving out file!")
-                raise IOError("Failed to write file header")
-
-            # Write channel names (16 bytes per channel)
-            fOut.write(struct.pack(self.__chN__ * '16s',
-                                   *[self.chInfo['Name'].iloc[i].encode('utf-8')
-                                     for i in range(self.__chN__)]).replace(b'\x00', b' '))
-
-            # Write channel units (4 bytes per channel)
-            fOut.write(struct.pack(self.__chN__ * '4s',
-                                   *[self.chInfo['Unit'].iloc[i].encode('utf-8')
-                                     for i in range(self.__chN__)]).replace(b'\x00', b' '))
-
-            # Calculate new coefficients for optimal data range
-            # Find maximum absolute value for each channel across selected segments
-            chMagMax = np.amax(np.array(
-                [np.amax(abs(self.data[i].values), axis=0) for i in sseg]),
-                axis=0)
-            
-            # Calculate coefficients to scale data to 16-bit range (-32767 to 32767)
-            chCoef_ = (chMagMax / 32767).astype(np.float32)
-            
-            # Write channel coefficients (4 bytes per channel)
-            fOut.write(struct.pack('=' + self.__chN__ * 'f', *chCoef_))
-
-            # Write channel indices (2 bytes per channel)
-            fOut.write(struct.pack('=' + self.__chN__ * 'h', *self.chInfo.index))
-
-            # Write each segment
-            for iseg in sseg:
-                # Align to 128-byte boundary
-                p_cur = fOut.tell()
-                fOut.seek(128 * math.ceil(p_cur / 128))
-
-                # Write segment information (256 bytes)
-                # Segment type
-                fOut.write(struct.pack('=h', self.segInfo['Type'][iseg]))
-                # Number of channels
-                fOut.write(struct.pack('=h', self.__chN__))
-                # Number of samples (+5 for compatibility)
-                fOut.write(struct.pack(
-                    '=l', self.segInfo['N sample'][iseg] + 5))
-                
-                # Write start and stop times (8 bytes)
-                # Convert time strings to bytes: HH:MM:SS.s -> [s, SS, MM, HH]
-                start_time_parts = re.split(':|\.', self.segInfo.Start[iseg])[::-1]
-                stop_time_parts = re.split(':|\.', self.segInfo.Stop[iseg])[::-1]
-                time_parts = start_time_parts + stop_time_parts
-                time_parts_int = list(map(int, time_parts))
-                fOut.write(struct.pack(8 * 'B', *time_parts_int))
-                
-                # Write segment note (240 bytes)
-                fOut.write(struct.pack('240s', self.segInfo.Note[iseg].encode(
-                    'utf-8')).replace(b'\x00', b' '))
-
-                # Calculate statistical information for each channel
-                # Mean values (as short integers)
-                mean_ = np.mean(self.data[iseg].values, axis=0) / chCoef_
-                # Standard deviations (as floats)
-                std_ = np.std(self.data[iseg].values, axis=0) / chCoef_
-                # Maximum and minimum values (as short integers)
-                max_ = np.amax(self.data[iseg].values, axis=0) / chCoef_
-                min_ = np.amin(self.data[iseg].values, axis=0) / chCoef_
-                
-                # Write statistical information
-                fOut.write(struct.pack('=' + self.__chN__ * 'h',
-                                       *np.round(mean_).astype(np.int16)))
-                fOut.write(struct.pack('=' + self.__chN__ * 'f', *std_))
-                fOut.write(struct.pack('=' + self.__chN__ * 'h',
-                                       *np.round(max_).astype(np.int16)))
-                fOut.write(struct.pack('=' + self.__chN__ * 'h',
-                                       *np.round(min_).astype(np.int16)))
-
-                # Convert data to 16-bit integers and write
-                raw_ = np.round(self.data[iseg].values / np.repeat(chCoef_.reshape(
-                    1, -1), self.segInfo['N sample'][iseg], axis=0)).astype(np.int16)
-                fOut.write(raw_.tobytes())
+        Notes:
+        ------
+        The output file will be named based on the original filename.
+        """
+        return export_to_mat(self, sseg)
 
     def add_channel(self, name, unit, series, fs, coef=1, point_of_move=0, sseg=0):
         """
@@ -1186,221 +728,6 @@ class PyDAS:
             logger.info(f"Channel information exported to: {excel_filename}")
             
         return self.chInfo
-
-    def to_dat(self, Time=True, sseg='all'):
-        """
-        Export data to DAT file format.
-        
-        Parameters:
-        -----------
-        Time : bool, optional
-            If True, include time column in the output, default is True
-        sseg : int or 'all', optional
-            Segment(s) to export, default is 'all'
-            
-        Notes:
-        ------
-        The output file will be named based on the original filename with
-        segment number and scale (model or full) appended.
-        """
-        def writefile(self, idx):
-            """
-            Helper function to write a single segment to a DAT file.
-            
-            Parameters:
-            -----------
-            idx : int
-                Index of the segment to write
-            """
-            # Prepare file path and name
-            path = os.getcwd()
-            
-            # Create filename based on scale (model or prototype)
-            if self.__scale__ == 'model':
-                filename = f"{path}/{os.path.splitext(self.__filename__)[0]}_seg{idx:02d}-model.dat"
-            else:
-                filename = f"{path}/{os.path.splitext(self.__filename__)[0]}_seg{idx:02d}-full.dat"
-            
-            # Prepare header information
-            header = [
-                f"OUTFILE NAME: {self.__filename__}",
-                f"CHANNEL NO.: {self.__chN__}",
-                f"SAMPLING FREQUENCY: {self.__fs__:.1f}"
-            ]
-            
-            # Add channel names and units to header
-            if Time:
-                header.append("Time " + " ".join(self.chInfo['Name']))
-                header.append("S " + " ".join(self.chInfo['Unit']))
-            else:
-                header.append(" ".join(self.chInfo['Name']))
-                header.append(" ".join(self.chInfo['Unit']))
-            
-            # Combine header lines
-            header_str = "\n".join(header)
-            
-            # Get number of samples for this segment
-            n_sample = self.segInfo.iloc[idx]['N sample']
-            
-            # Write data with or without time column
-            if Time:
-                # Create time vector
-                time_vector = np.arange(0, n_sample / self.__fs__, 1 / self.__fs__)
-                
-                # Create output array with time as first column
-                datawrite = np.zeros((n_sample, self.__chN__ + 1))
-                datawrite[:, 0] = time_vector
-                datawrite[:, 1:] = self.data[idx].values
-                
-                # Save to file
-                np.savetxt(
-                    filename,
-                    datawrite,
-                    fmt='% .5E',
-                    delimiter=' ',
-                    header=header_str
-                )
-            else:
-                # Convert DataFrame to string with proper formatting
-                with open(filename, 'w') as f:
-                    f.write(header_str + "\n")
-                    f.write(
-                        self.data[idx].to_string(
-                            header=False,
-                            index=False,
-                            justify='left',
-                            float_format='% .5E'
-                        )
-                    )
-            
-            logger.info(f"Data exported to: {filename}")
-
-        # Determine which segments to export
-        if sseg == 'all':
-            # Export all segments
-            for idx in range(self.__segN__):
-                writefile(self, idx)
-        elif isinstance(sseg, int):
-            # Export single segment if valid
-            if sseg < self.__segN__:
-                writefile(self, sseg)
-            else:
-                logger.warning(f"Segment {sseg} exceeds the maximum segment number ({self.__segN__ - 1}).")
-        else:
-            logger.warning("Invalid segment selection. Use an integer or 'all'.")
-
-    def print_statistics(self, printTxt=False, printExcel=False):
-        """
-        Print and optionally export statistical information for all channels.
-        
-        Parameters:
-        -----------
-        printTxt : bool, optional
-            If True, export statistics to a text file, default is False
-        printExcel : bool, optional
-            If True, export statistics to an Excel file, default is False
-            
-        Returns:
-        --------
-        None
-            Statistics are printed to the console and optionally exported to files
-        """
-        # Update statistics for all segments
-        self.updateST(sseg=0)
-        
-        # Print separator line and segment count
-        logger.info(f'Segment total: {self.__segN__:02d}')
-        
-        # Print statistics for each segment
-        for idx, segment_stats in enumerate(self.segStatis):
-            logger.info(f'Seg{idx:02d}')
-            logger.info('\n' + segment_stats.to_string(float_format='% .3E', justify='center'))
-        
-        
-        # Export to files if requested
-        if printTxt or printExcel:
-            # Prepare file path
-            path = os.getcwd()
-            base_filename = os.path.splitext(self.__filename__)[0]
-            
-            # Export to text file
-            if printTxt:
-                txt_filename = f"{path}/{base_filename}_statistic.txt"
-                
-                # Write to file
-                with open(txt_filename, 'w') as infoFile:
-                    infoFile.write(f'Segment total: {self.__segN__:02d}\n')
-                    
-                    # Write statistics for each segment
-                    for idx, segment_stats in enumerate(self.segStatis):
-                        infoFile.write('\n')
-                        infoFile.write(f'Seg{idx:02d}\n')
-                        infoFile.write(segment_stats.to_string(
-                            float_format='% .3E', justify='center'))
-                
-                logger.info(f"Statistics exported to: {txt_filename}")
-            
-            # Export to Excel file
-            if printExcel:
-                excel_filename = f"{path}/{base_filename}_statistic.xlsx"
-                
-                # Write each segment to a separate sheet
-                with pd.ExcelWriter(excel_filename) as writer:
-                    for idx, segment_stats in enumerate(self.segStatis):
-                        segment_stats.to_excel(writer, sheet_name=f'SEG{idx:02d}')
-                
-                logger.info(f"Statistics exported to: {excel_filename}")
-
-    def to_mat(self, sseg=0):
-        """
-        Export data to MATLAB MAT file format.
-        
-        Parameters:
-        -----------
-        sseg : int, optional
-            Segment index to export, default is 0
-            
-        Returns:
-        --------
-        bool
-            True if export was successful, False otherwise
-            
-        Notes:
-        ------
-        The output file will be named based on the original filename.
-        """
-        # Validate segment index
-        if not isinstance(sseg, int):
-            logger.warning("Selected segment id must be an integer.")
-            return False
-            
-        if sseg >= self.__segN__:
-            logger.warning(f"Segment {sseg} exceeds the maximum segment number ({self.__segN__ - 1}).")
-            return False
-            
-        # Create dictionary with data to export
-        data_dic = {
-            'Data': self.data[sseg].values,
-            'chName': self.chInfo['Name'].values,
-            'chUnit': self.chInfo['Unit'].values,
-            'Date': self.__date__,
-            'fs': self.__fs__,
-            'chN': self.__chN__,
-            'Readme': 'Generated by PyDAS from python, SKLOE/SJTU'
-        }
-        
-        # Prepare file path and name
-        path = os.getcwd()
-        mat_filename = f"{path}/{os.path.splitext(self.__filename__)[0]}.mat"
-        
-        # Save to MAT file
-        try:
-            sio.savemat(mat_filename, data_dic)
-            logger.info(f"Data exported to: {mat_filename}")
-            return True
-        except Exception as e:
-            logger.error(f"Error exporting to MAT file: {str(e)}")
-            return False
 
     def fix_unit(self, chName, newunit, pInfo=False):
         """
@@ -1999,13 +1326,9 @@ class PyDAS:
                     )
                     
                     # Use Plotly for interactive comparison
-                    from pydas_plot import plot_channel
-                    # Plot original and filtered data together
-                    channels = [chName, temp_channel_name]
-                    logger.info(f"Displaying interactive comparison plot for {chName} before/after filtering (cutoff={cutoffull} Hz, order={order})")
                     plot_channel(
                         pydas_obj=temp_pydas,
-                        ch_name=channels,
+                        ch_name=[chName, temp_channel_name],
                         sseg=sseg,
                         title=f"Lowpass Filter Comparison - {chName} (cutoff={cutoffull} Hz, order={order})",
                         alpha=[0.5, 0.8],  # 原始数据透明度0.5，滤波后数据保持默认0.8
@@ -2169,13 +1492,9 @@ class PyDAS:
                     )
                     
                     # Use Plotly for interactive comparison
-                    from pydas_plot import plot_channel
-                    # Plot original and filtered data together
-                    channels = [chName, temp_channel_name]
-                    logger.info(f"Displaying interactive comparison plot for {chName} before/after filtering (cutoff={cutoffull} Hz, order={order})")
                     plot_channel(
                         pydas_obj=temp_pydas,
-                        ch_name=channels,
+                        ch_name=[chName, temp_channel_name],
                         sseg=sseg,
                         title=f"Highpass Filter Comparison - {chName} (cutoff={cutoffull} Hz, order={order})",
                         alpha=[0.5, 0.8],  # 原始数据透明度0.5，滤波后数据保持默认0.8
@@ -2297,9 +1616,9 @@ class PyDAS:
             logger.warning('Unknown type for ChName!')
 
     def cut_series(self,
-                  start,
-                  stop,
-                  sseg=0):
+                   start,
+                   stop,
+                   sseg=0):
         """
         Cut a time series to a specified range.
         
@@ -2806,9 +2125,9 @@ class PyDAS:
             raise ValueError("Number of channels does not match!")
 
     def rename_channel(self,
-                 chOld,
-                 chNew,
-                 sseg=0):
+                     chOld,
+                     chNew,
+                     sseg=0):
         """
         Rename a channel in the dataset.
         
@@ -3256,40 +2575,13 @@ class PyDAS:
         Figure object (matplotlib.Figure or plotly.graph_objects.Figure)
         """
         try:
-            from pydas_plot import plot_channel as plot_channel_func
-            
-            # 将ch_idx转换为ch_name
-            if isinstance(ch_idx, int):
-                if ch_idx < len(self.chInfo):
-                    ch_name = self.chInfo.iloc[ch_idx]['Name']
-                else:
-                    logger.error(f"Channel index {ch_idx} out of bounds.")
-                    return None
-            elif isinstance(ch_idx, str):
-                if ch_idx in self.chInfo['Name'].values:
-                    ch_name = ch_idx
-                else:
-                    logger.error(f"Channel '{ch_idx}' not found.")
-                    return None
-            elif isinstance(ch_idx, list):
-                # 如果是通道名称列表，直接使用
-                if all(isinstance(item, str) for item in ch_idx):
-                    ch_name = ch_idx
-                # 如果是索引列表，转换为名称列表
-                elif all(isinstance(item, int) for item in ch_idx):
-                    ch_name = [self.chInfo.iloc[i]['Name'] for i in ch_idx if i < len(self.chInfo)]
-                    if not ch_name:
-                        logger.error("No valid channels to plot.")
-                        return None
-                else:
-                    logger.error("Channel list must contain all strings or all integers.")
-                    return None
-            else:
-                logger.error("Channel identifier must be an integer, string, or list.")
+            # 验证通道并转换为通道名称
+            ch_name = validate_channel(self, ch_idx)
+            if ch_name is None:
                 return None
             
-            # 调用外部模块的plot_channel函数
-            return plot_channel_func(
+            # 调用plot模块的plot_channel函数
+            plot_channel(
                 pydas_obj=self,
                 ch_name=ch_name,
                 sseg=sseg,
@@ -3316,13 +2608,13 @@ class PyDAS:
                 table_width=table_width,
                 column_widths=column_widths
             )
-            
-        except ImportError:
-            logger.error("pydas_plot module not found. Please ensure it's installed and in the Python path.")
+            return None
+        except ImportError as e:
+            logger.error(f"Plot module not found: {str(e)}")
             return None
         except Exception as e:
             logger.error(f"Error in plot_channel: {str(e)}")
-            raise
+            return None
 
     def plot_histogram(self, ch_idx, sseg=0, title=None, xlabel=None, ylabel='Count',
                     bins=50, xlim=None, ylim=None, grid=True, show=True, 
@@ -3382,57 +2674,13 @@ class PyDAS:
         Figure object (matplotlib.figure.Figure or plotly.graph_objects.Figure)
         """
         try:
-            from pydas_plot import plot_histogram as plot_histogram_func
-            
-            # 将ch_idx转换为ch_name
-            if isinstance(ch_idx, int):
-                    if ch_idx < len(self.chInfo):
-                        ch_name = self.chInfo.iloc[ch_idx]['Name']
-                    else:
-                        logger.error(f"Channel index {ch_idx} out of bounds.")
-                        return None
-            elif isinstance(ch_idx, str):
-                if ch_idx in self.chInfo['Name'].values:
-                    ch_name = ch_idx
-                else:
-                    logger.error(f"Channel '{ch_idx}' not found.")
-                    return None
-            elif isinstance(ch_idx, list):
-                # 处理通道列表 - 支持索引列表或名称列表
-                ch_name = []
-                
-                # 如果是通道名称列表，验证每个名称
-                if all(isinstance(item, str) for item in ch_idx):
-                    for name in ch_idx:
-                        if name in self.chInfo['Name'].values:
-                            ch_name.append(name)
-                        else:
-                            logger.warning(f"Channel '{name}' not found, skipping.")
-                    
-                    if not ch_name:
-                        logger.error("No valid channels to plot.")
-                        return None
-                    
-                # 如果是索引列表，转换为名称列表
-                elif all(isinstance(item, int) for item in ch_idx):
-                    for idx in ch_idx:
-                        if idx < len(self.chInfo):
-                            ch_name.append(self.chInfo.iloc[idx]['Name'])
-                        else:
-                            logger.warning(f"Channel index {idx} out of bounds, skipping.")
-                    
-                    if not ch_name:
-                        logger.error("No valid channels to plot.")
-                        return None
-                    else:
-                        logger.error("Channel list must contain all strings or all integers.")
-                    return None
-            else:
-                logger.error("Channel identifier must be an integer, string, or list.")
+            # 验证通道并转换为通道名称
+            ch_name = validate_channel(self, ch_idx)
+            if ch_name is None:
                 return None
             
-            # 调用外部模块的plot_histogram函数
-            return plot_histogram_func(
+            # 调用plot模块的plot_histogram函数
+            plot_histogram(
                 pydas_obj=self,
                 ch_name=ch_name,
                 sseg=sseg,
@@ -3456,13 +2704,13 @@ class PyDAS:
                 fit_gaussian=fit_gaussian,
                 fit_color=fit_color
             )
-            
-        except ImportError:
-            logger.error("pydas_plot module not found. Please ensure it's installed and in the Python path.")
+            return None
+        except ImportError as e:
+            logger.error(f"Plot module not found: {str(e)}")
             return None
         except Exception as e:
             logger.error(f"Error in plot_histogram: {str(e)}")
-            raise
+            return None
             
     def plot_xy(self, x_ch_idx, y_ch_idx, sseg=0, title=None, 
               xlabel=None, ylabel=None, xlim=None, ylim=None, grid=True, 
@@ -3523,22 +2771,17 @@ class PyDAS:
             tuple: (pandas.DataFrame with x and y data, figure object)
         """
         try:
-            # 将通道索引或名称转换为通道名称
-            x_ch_name = self._validate_channel(x_ch_idx)
-            y_ch_name = self._validate_channel(y_ch_idx)
-            
-            if x_ch_name is None or y_ch_name is None:
+            # 验证通道并转换为通道名称
+            x_ch_name = validate_channel(self, x_ch_idx)
+            if x_ch_name is None:
+                return None
+                
+            y_ch_name = validate_channel(self, y_ch_idx)
+            if y_ch_name is None:
                 return None
             
-            # 尝试导入pydas_plot模块
-            try:
-                from pydas_plot import plot_xy as plot_xy_func
-            except ImportError:
-                logger.error("pydas_plot module not found. Please ensure it's installed and in the Python path.")
-                return None
-            
-            # 调用外部模块的plot_xy函数
-            return plot_xy_func(
+            # 调用plot模块的plot_xy函数
+            plot_xy(
                 pydas_obj=self,
                 x_ch_name=x_ch_name,
                 y_ch_name=y_ch_name,
@@ -3579,424 +2822,13 @@ class PyDAS:
                 memory_efficient=memory_efficient,
                 bin_size=bin_size
             )
+            return None
             
-        except ImportError:
-            logger.error("pydas_plot module not found. Please ensure it's installed and in the Python path.")
+        except ImportError as e:
+            logger.error(f"Plot module not found: {str(e)}")
             return None
         except Exception as e:
             logger.error(f"Error in plot_xy: {str(e)}")
-            raise
-    
-    def _validate_channel(self, ch_idx):
-        """
-        Validate channel index and return the normalized index.
-        
-        Parameters:
-        -----------
-        ch_idx : int or str
-            Channel index or name
-            
-        Returns:
-        --------
-        int
-            Normalized channel index
-        """
-        if isinstance(ch_idx, str):
-            if ch_idx in self.chInfo['Name'].values:
-                return self.chInfo[self.chInfo['Name'] == ch_idx].index[0]
-            else:
-                logger.error(f"Channel name '{ch_idx}' not found.")
-                return -1
-        elif isinstance(ch_idx, (int, np.integer)):
-            if 0 <= ch_idx < self.__chN__:
-                return ch_idx
-            else:
-                logger.error(f"Channel index {ch_idx} out of range [0, {self.__chN__-1}].")
-                return -1
-        else:
-            logger.error(f"Invalid channel identifier type: {type(ch_idx)}")
-            return -1
-            
-    def _get_default_transDict(self, g=9.807):
-        """
-        获取默认的单位转换字典
-        
-        Parameters:
-        -----------
-        g : float, optional
-            重力加速度，默认值为9.807 m/s²
-            
-        Returns:
-        --------
-        dict
-            单位转换字典，包含常用单位的转换规则
-        """
-        return {
-            'kg': ['kN', np.array([g * 0.001, 1.0, 3.0])],
-            'cm': ['m', np.array([0.01, 0.0, 1.0])],
-            'mm': ['m', np.array([0.001, 0.0, 1.0])],
-            'm': ['m', np.array([1, 0.0, 1.0])],
-            's': ['s', np.array([1, 0.0, 0.5])],
-            'deg': ['deg', np.array([1, 0.0, 0.0])],
-            'rad': ['rad', np.array([1, 0.0, 0.0])],
-            'n': ['kn', np.array([0.001, 1.0, 3.0])],
-            'kn': ['kn', np.array([1, 0.0, 0.0])],
-            '%': ['%', np.array([1, 0.0, 0.0])],
-            '-': ['-', np.array([1, 0.0, 0.0])]
-        }
-
-    def _findtrans(self, unit, transDict=None, trans_cache=None):
-        """
-        查找单位的转换参数
-        
-        Parameters:
-        -----------
-        unit : str
-            需要转换的单位
-        transDict : dict, optional
-            单位转换字典，如果为None，使用默认字典
-        trans_cache : dict, optional
-            用于存储已计算过的转换结果的缓存
-            
-        Returns:
-        --------
-        list
-            [new_unit, coefficients]，其中coefficients是[coeff_unit, coeff_rho, coeff_lambda]
-        """
-        if transDict is None:
-            transDict = self._get_default_transDict()
-            
-        # 初始化缓存
-        if trans_cache is None:
-            trans_cache = {}
-            
-        # 检查结果是否已在缓存中
-        unit = unit.lower().strip()
-        if unit in trans_cache:
-            return trans_cache[unit]
-        
-        if unit in transDict:
-            trans = transDict[unit]
-            trans_cache[unit] = trans
-            return trans
-        elif '/' in unit:
-            unitUpper, unitLower = unit.split('/')
-            transUpper = self._findtrans(unitUpper, transDict, trans_cache)
-            transLower = self._findtrans(unitLower, transDict, trans_cache)
-            trans = [transUpper[0] + '/' +
-                     transLower[0], np.array([0.0, 0.0, 0.0])]
-            trans[1][0] = transUpper[1][0] / transLower[1][0]
-            trans[1][1] = transUpper[1][1] - transLower[1][1]
-            trans[1][2] = transUpper[1][2] - transLower[1][2]
-            trans_cache[unit] = trans
-            return trans
-        elif '.' in unit:
-            unitWithDot = unit.split('.')
-            transU = []
-            transN1 = np.array([])
-            transN2 = np.array([])
-            transN3 = np.array([])
-            for uWithDot in unitWithDot:
-                transWithDot = self._findtrans(uWithDot, transDict, trans_cache)
-                transU.append(transWithDot[0])
-                transN1 = np.append(transN1, transWithDot[1][0])
-                transN2 = np.append(transN2, transWithDot[1][1])
-                transN3 = np.append(transN3, transWithDot[1][2])
-            trans = ['.'.join(transU), np.array([1.0, 0.0, 0.0])]
-            for x in np.nditer(transN1):
-                trans[1][0] *= x
-            trans[1][1] = transN2.sum()
-            trans[1][2] = transN3.sum()
-            trans_cache[unit] = trans
-            return trans
-        elif unit[-1].isdigit():
-            n = int(unit[-1])
-            unit_base = unit[0:-1]
-            if unit_base in transDict:
-                trans_temp = transDict[unit_base]
-                trans = [trans_temp[0] +
-                         str(n), np.array([1.0, 0.0, 0.0])]
-                trans[1][0] = trans_temp[1][0]**n
-                trans[1][1] = trans_temp[1][1] * n
-                trans[1][2] = trans_temp[1][2] * n
-                trans_cache[unit] = trans
-                return trans
-            else:
-                logger.warning(
-                    f"Input unit '{unit}' cannot be identified, using default values.")
-                return [unit, np.array([1.0, 0.0, 0.0])]
-        else:
-            logger.warning(
-                f"Input unit '{unit}' cannot be identified, using default values.")
-            return [unit, np.array([1.0, 0.0, 0.0])]
-            
-    def _plot_spectrum(self, spec, channel_name, title=None, xlim=None, ylim=None, 
-                      figsize=(10, 6), show=True, save_path=None, dpi=300,
-                      use_plotly=True, save_html=None, width=None, height=None,
-                      fullscale=False):
-        """Helper method to plot spectrum."""
-        try:
-            # Check if spec exists
-            if spec is None:
-                print(f"Unable to compute spectrum for channel {channel_name}")
-                return None
-            
-            # Get frequency (Hz) and spectral density
-            if hasattr(spec, 'args'):
-                if isinstance(spec.args, tuple) and len(spec.args) > 0:
-                    # Handle case where spec.args is a tuple
-                    f = spec.args[0]  # 保持角频率单位 (rad/s)
-                else:
-                    # Handle case where args is directly available but not a tuple
-                    f = spec.args  # 保持角频率单位 (rad/s)
-            else:
-                # Handle other cases where frequency might be stored
-                raise ValueError("Could not find frequency data in spectrum object")
-                
-            if hasattr(spec, 'data'):
-                S = spec.data  # Spectral density from data attribute
-            elif hasattr(spec, 'S'):
-                S = spec.S  # Spectral density from S attribute
-            else:
-                raise ValueError("Could not find spectral density data in spectrum object")
-            
-            # Check if f and S are numpy arrays
-            if not isinstance(f, np.ndarray) or not isinstance(S, np.ndarray):
-                warnings.warn("Frequency or spectrum data is not a numpy array.")
-                return None
-            
-            # Ensure f and S have matching dimensions
-            if f.ndim > 1:
-                f = f.flatten()
-                warnings.warn("Flattened frequency array of dimension > 1")
-            if S.ndim > 1:
-                S = S.flatten()
-                warnings.warn("Flattened spectral density array of dimension > 1")
-            
-            if len(f) != len(S):
-                warnings.warn(f"Frequency and spectral density arrays have different lengths: {len(f)} vs {len(S)}")
-                min_len = min(len(f), len(S))
-                f = f[:min_len]
-                S = S[:min_len]
-            
-            # Try to compute spectral characteristics
-            try:
-                # Calculate spectral moments
-                moment_0 = spec.moment(0)
-                if isinstance(moment_0, tuple) and len(moment_0) > 0:
-                    if isinstance(moment_0[0], list) and len(moment_0[0]) > 0:
-                        m0 = float(moment_0[0][0])  # Extract from list in tuple
-                    else:
-                        m0 = float(moment_0[0])  # Extract from tuple
-                else:
-                    m0 = float(moment_0)  # Direct value
-                
-                # Try to get higher moments with the same approach
-                try:
-                    moment_1 = spec.moment(1)
-                    if isinstance(moment_1, tuple) and len(moment_1) > 0:
-                        if isinstance(moment_1[0], list) and len(moment_1[0]) > 0:
-                            m1 = float(moment_1[0][0])
-                        else:
-                            m1 = float(moment_1[0])
-                    else:
-                        m1 = float(moment_1)
-                except Exception:
-                    m1 = None
-                
-                try:
-                    moment_2 = spec.moment(2)
-                    if isinstance(moment_2, tuple) and len(moment_2) > 0:
-                        if isinstance(moment_2[0], list) and len(moment_2[0]) > 0:
-                            m2 = float(moment_2[0][0])
-                        else:
-                            m2 = float(moment_2[0])
-                    else:
-                        m2 = float(moment_2)
-                except Exception:
-                    m2 = None
-                
-                # Calculate standard spectral parameters
-                Hm0 = 4.0 * np.sqrt(m0) if m0 is not None else None
-                
-                # 计算峰值周期Tp (s)，将角频率转换为周期
-                if len(S) > 0:
-                    max_idx = np.argmax(S)
-                    if max_idx < len(f) and f[max_idx] > 0:
-                        Tp = 2 * np.pi / f[max_idx]  # 从角频率(rad/s)计算周期(s)
-                    else:
-                        Tp = None
-                else:
-                    Tp = None
-                
-                # 计算平均周期  
-                Tm01 = 2 * np.pi * m0 / m1 if m0 is not None and m1 is not None and m1 != 0 else None
-                Tm02 = 2 * np.pi * np.sqrt(m0 / m2) if m0 is not None and m2 is not None and m2 != 0 else None
-                
-                # Format the spectral characteristics text
-                stats_text = []
-                if Hm0 is not None:
-                    if fullscale:
-                        # 由于数据已经在spectral_analysis函数中被缩放,
-                        # 这里的谱矩和Hm0已经反映了全尺度的值，所以不需要额外缩放
-                        stats_text.append(f"Hm0 = {Hm0:.2f} m (full scale)")
-                    else:
-                        stats_text.append(f"Hm0 = {Hm0:.2f} m")
-                if Tp is not None:
-                    if fullscale:
-                        # 峰值周期已经反映了全尺度的值，因为频率已经在計算中被调整
-                        stats_text.append(f"Tp = {Tp:.2f} s (full scale)")
-                    else:
-                        stats_text.append(f"Tp = {Tp:.2f} s")
-                if Tm01 is not None:
-                    if fullscale:
-                        # Tm01已经反映了全尺度的值，因为频率已经在計算中被调整
-                        stats_text.append(f"Tm01 = {Tm01:.2f} s (full scale)")
-                    else:
-                        stats_text.append(f"Tm01 = {Tm01:.2f} s")
-                if Tm02 is not None:
-                    if fullscale:
-                        # Tm02已经反映了全尺度的值，因为频率已经在計算中被调整
-                        stats_text.append(f"Tm02 = {Tm02:.2f} s (full scale)")
-                    else:
-                        stats_text.append(f"Tm02 = {Tm02:.2f} s")
-                stats_text = "\n".join(stats_text)
-            except Exception as e:
-                warnings.warn(f"Unable to calculate all spectral characteristics: {str(e)}")
-                stats_text = "Spectral characteristics unavailable"
-            
-            # Set title if not provided
-            if title is None:
-                if fullscale:
-                    title = f"Full Scale Spectrum of {channel_name}"
-                else:
-                    title = f"Spectrum of {channel_name}"
-            
-            if use_plotly:
-                import plotly.graph_objects as go
-                from plotly.offline import plot
-                
-                # Set the width and height if provided
-                if width is None:
-                    width = figsize[0] * 100
-                if height is None:
-                    height = figsize[1] * 100
-                
-                # Create figure
-                fig = go.Figure()
-                
-                # Add spectrum trace
-                fig.add_trace(
-                    go.Scatter(
-                        x=f,
-                        y=S,
-                        mode='lines',
-                        line=dict(color='blue', width=2),
-                        name='Spectrum'
-                    )
-                )
-                
-                # Update layout
-                fig.update_layout(
-                    title=title,
-                    xaxis_title='Angular Frequency (rad/s)',
-                    yaxis_title='Spectral Density',
-                    width=width,
-                    height=height,
-                    margin=dict(l=50, r=50, b=50, t=70, pad=4),
-                    annotations=[
-                        dict(
-                            x=0.99,
-                            y=0.99,
-                            xref="paper",
-                            yref="paper",
-                            text=stats_text,
-                            showarrow=False,
-                            align="right",
-                            xanchor="right",
-                            yanchor="top",
-                            bgcolor="rgba(255, 255, 255, 0.7)",
-                            bordercolor="black",
-                            borderwidth=1,
-                            font=dict(size=12),
-                        )
-                    ]
-                )
-                
-                # Set axis limits if provided
-                if xlim is not None:
-                    fig.update_xaxes(range=xlim)
-                else:
-                    # 设置x轴从0开始
-                    fig.update_xaxes(range=[0, max(f) * 1.05])
-                
-                if ylim is not None:
-                    fig.update_yaxes(range=ylim)
-                else:
-                    # 设置y轴从0开始
-                    fig.update_yaxes(range=[0, max(S) * 1.05])
-                
-                # Show or save the figure
-                if show:
-                    fig.show()
-                
-                if save_html is not None:
-                    plot(fig, filename=save_html, auto_open=False)
-                
-                if save_path is not None:
-                    fig.write_image(save_path, scale=2)
-                    
-                return fig
-            else:
-                # Original matplotlib implementation
-                import matplotlib.pyplot as plt
-                
-                # Create figure
-                fig, ax = plt.subplots(figsize=figsize)
-                
-                # Plot spectrum
-                ax.plot(f, S, 'b-', linewidth=2)
-                
-                # Set labels and title
-                ax.set_xlabel('Angular Frequency (rad/s)')
-                ax.set_ylabel('Spectral Density')
-                ax.set_title(title)
-                    
-                # Add text box with spectral characteristics
-                if stats_text:
-                    props = dict(boxstyle='round', facecolor='white', alpha=0.7)
-                    ax.text(0.98, 0.98, stats_text, transform=ax.transAxes, 
-                            verticalalignment='top', horizontalalignment='right', 
-                            bbox=props, fontsize=10)
-                
-                # Set axis limits if provided
-                if xlim is not None:
-                    ax.set_xlim(xlim)
-                else:
-                    # 设置x轴从0开始
-                    ax.set_xlim(0, max(f) * 1.05)
-                    
-                if ylim is not None:
-                    ax.set_ylim(ylim)
-                else:
-                    # 设置y轴从0开始
-                    ax.set_ylim(0, max(S) * 1.05)
-                
-                # Add grid
-                ax.grid(True, linestyle='--', alpha=0.7)
-                
-                # Show or save the figure
-                if save_path is not None:
-                    plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
-                
-                if show:
-                    plt.show()
-                else:
-                    plt.close()
-                
-                return fig
-        except Exception as e:
-            logger.error(f"Error plotting spectrum: {str(e)}")
             return None
 
     def channel2fullscale(self, channel_name, lam, rho=1.025, g=9.807):
@@ -4350,3 +3182,65 @@ class PyDAS:
                     plt.close()
         
         return spec
+
+    def print_statistics(self, printTxt=False, printExcel=False):
+        """
+        Print and optionally export statistical information for all channels.
+        
+        Parameters:
+        -----------
+        printTxt : bool, optional
+            If True, export statistics to a text file, default is False
+        printExcel : bool, optional
+            If True, export statistics to an Excel file, default is False
+            
+        Returns:
+        --------
+        None
+            Statistics are printed to the console and optionally exported to files
+        """
+        # Update statistics for all segments
+        self.updateST(sseg=0)
+        
+        # Print separator line and segment count
+        logger.info(f'Segment total: {self.__segN__:02d}')
+        
+        # Print statistics for each segment
+        for idx, segment_stats in enumerate(self.segStatis):
+            logger.info(f'Seg{idx:02d}')
+            logger.info('\n' + segment_stats.to_string(float_format='% .3E', justify='center'))
+        
+        
+        # Export to files if requested
+        if printTxt or printExcel:
+            # Prepare file path
+            path = os.getcwd()
+            base_filename = os.path.splitext(self.__filename__)[0]
+            
+            # Export to text file
+            if printTxt:
+                txt_filename = f"{path}/{base_filename}_statistic.txt"
+                
+                # Write to file
+                with open(txt_filename, 'w') as infoFile:
+                    infoFile.write(f'Segment total: {self.__segN__:02d}\n')
+                    
+                    # Write statistics for each segment
+                    for idx, segment_stats in enumerate(self.segStatis):
+                        infoFile.write('\n')
+                        infoFile.write(f'Seg{idx:02d}\n')
+                        infoFile.write(segment_stats.to_string(
+                            float_format='% .3E', justify='center'))
+                
+                logger.info(f"Statistics exported to: {txt_filename}")
+            
+            # Export to Excel file
+            if printExcel:
+                excel_filename = f"{path}/{base_filename}_statistic.xlsx"
+                
+                # Write each segment to a separate sheet
+                with pd.ExcelWriter(excel_filename) as writer:
+                    for idx, segment_stats in enumerate(self.segStatis):
+                        segment_stats.to_excel(writer, sheet_name=f'SEG{idx:02d}')
+                
+                logger.info(f"Statistics exported to: {excel_filename}")
