@@ -507,26 +507,19 @@ class PyDAS:
 
     def to_feather(self, sseg='all', compression='zstd'):
         """
-        Export data to Feather file format.
-        
+        Export data to feather file format
+
         Parameters:
         -----------
         sseg : int, list, or 'all', optional
-            Segment(s) to export, default is 'all'
-        compression : str or None, optional
-            Compression type to use. Options include: 'zstd', 'lz4', 'uncompressed'
-            Default is 'zstd' which offers good compression and very fast read/write performance.
-            
+            Segment(s) to export
+        compression : str, optional
+            Compression to use, default is 'zstd', other options include 'lz4' and 'uncompressed'
+
         Returns:
         --------
         bool
-            True if export was successful, False otherwise
-            
-        Notes:
-        ------
-        The output file(s) will be named based on the original filename with segment number appended.
-        Feather format provides extremely fast read and write performance with pandas DataFrames.
-        It is particularly well-suited for temporary storage and data exchange between Python and R.
+            True if export was successful
         """
         return export_to_feather(self, sseg, compression)
 
@@ -765,7 +758,7 @@ class PyDAS:
                 self.chInfo.to_excel(writer, sheet_name='Channel Info')
             logger.info(f"Information exported to: {excel_filename}")
             
-        return info
+        return None
 
     def print_channel_info(self, printTxt=False, printExcel=False):
         """
@@ -801,7 +794,7 @@ class PyDAS:
             self.chInfo.to_excel(excel_filename)
             logger.info(f"Channel information exported to: {excel_filename}")
             
-        return self.chInfo
+        return None
 
     def fix_unit(self, chName, newunit, pInfo=False):
         """
@@ -1896,11 +1889,11 @@ class PyDAS:
                     xlabel='Time (s)', ylabel=None, grid=True, 
                     color=None, linewidth=1.0, alpha=0.8,
                     xlim=None, ylim=None, 
-                 downsampling=True, max_points=40000, 
-                 save_path=None, show=True, use_plotly=True,
-                 height=None, width=None, save_html=None,
-                 table_width=0.25, column_widths=None,
-                 stats=True, dpi=300):
+                    downsampling=True, max_points=40000, 
+                    save_path=None, show=True, plotbackend=None,
+                    height=None, width=None, save_html=None,
+                    table_width=0.25, column_widths=None,
+                    stats=True, dpi=300):
         """
         Plot a channel from the PyDAS object with interactive features.
         
@@ -1938,12 +1931,12 @@ class PyDAS:
             Path to save the figure, default is None (don't save)
         show : bool, optional
             Whether to display the plot, default is True
-        use_plotly : bool, optional
-            Whether to use Plotly for interactive web-based plotting, default is True
+        plotbackend : str, optional
+            Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto), default is None (auto)
         height : int, optional
-            Height in pixels for Plotly plot, default is None (auto)
+            Height in pixels for plot, default is None (auto)
         width : int, optional
-            Width in pixels for Plotly plot, default is None (auto)
+            Width in pixels for plot, default is None (auto)
         save_html : str, optional
             Path to save the interactive HTML plot, default is None (don't save)
         table_width : float, optional
@@ -1957,7 +1950,7 @@ class PyDAS:
             
         Returns:
         --------
-        Figure object (matplotlib.Figure or plotly.graph_objects.Figure)
+        Figure object (matplotlib.figure.Figure or plotly.graph_objects.Figure)
         """
         try:
             # 验证通道并转换为通道名称
@@ -1978,7 +1971,7 @@ class PyDAS:
                 grid=grid,
                 show=show,
                 save_path=save_path,
-                use_plotly=use_plotly,
+                plotbackend=plotbackend,
                 downsampling=downsampling,
                 max_points=max_points,
                 save_html=save_html,
@@ -2003,7 +1996,7 @@ class PyDAS:
 
     def plot_histogram(self, ch_idx, sseg=0, title=None, xlabel=None, ylabel='Count',
                     bins=50, xlim=None, ylim=None, grid=True, show=True, 
-                    save_path=None, use_plotly=True, save_html=None, 
+                    save_path=None, plotbackend=None, save_html=None, 
                     dpi=300, width=None, height=None, color=None, 
                     alpha=0.6, figsize=(12, 6), fit_gaussian=True, fit_color='red'):
         """
@@ -2033,16 +2026,16 @@ class PyDAS:
             Whether to display the plot, default is True
         save_path : str, optional
             Path to save the plot, default is None (don't save)
-        use_plotly : bool, optional
-            Use Plotly for interactive web-based plotting, default is True
+        plotbackend : str, optional
+            Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto), default is None (auto)
         save_html : str, optional
             Path to save the interactive HTML plot, default is None (don't save)
         dpi : int, optional
             DPI for saved image, default is 300
         width : int, optional
-            Width in pixels for Plotly plot, default is None (auto)
+            Width in pixels for plot, default is None (auto)
         height : int, optional
-            Height in pixels for Plotly plot, default is None (auto)
+            Height in pixels for plot, default is None (auto)
         color : str or list, optional
             Histogram color or list of colors, default is None (auto-generated)
         alpha : float, optional
@@ -2078,7 +2071,7 @@ class PyDAS:
                 grid=grid,
                 show=show,
                 save_path=save_path,
-                use_plotly=use_plotly,
+                plotbackend=plotbackend,
                 save_html=save_html,
                 dpi=dpi,
                 width=width,
@@ -2099,7 +2092,7 @@ class PyDAS:
             
     def plot_xy(self, x_ch_idx, y_ch_idx, sseg=0, title=None, 
               xlabel=None, ylabel=None, xlim=None, ylim=None, grid=True, 
-              show=True, save_path=None, use_plotly=True, save_html=None,
+              show=True, save_path=None, plotbackend=None, save_html=None,
               dpi=300, width=None, height=None, color='blue', alpha=0.8, 
               marker_size=5, figsize=(8, 8), line=False, fit_line=False,
               fit_color='red', fit_line_width=2, fit_alpha=0.8,
@@ -2107,7 +2100,9 @@ class PyDAS:
               density_plot=False, density_colorscale='Viridis', 
               density_opacity=0.7, use_webgl=True, adaptive_sampling=False,
               datashade=False, contour_levels=20, sampling_algorithm='lttb',
-              memory_efficient=True, bin_size=None):
+              memory_efficient=True, bin_size=None, sns_style=None,
+              sns_bins=50, sns_pthresh=0.1, sns_cmap=None,
+              sns_contour_levels=5, sns_contour_color=None, sns_linewidths=None):
         """
         Create an XY scatter plot with one channel on the X-axis and another on the Y-axis.
         
@@ -2123,8 +2118,8 @@ class PyDAS:
             grid (bool, optional): Show grid. Defaults to True.
             show (bool, optional): Display the plot. Defaults to True.
             save_path (str, optional): Path to save the plot. Defaults to None.
-            use_plotly (bool, optional): Use Plotly for interactive plot. Defaults to True.
-            save_html (str, optional): Path to save interactive Plotly plot as HTML. Defaults to None.
+            plotbackend (str, optional): Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto). Defaults to None.
+            save_html (str, optional): Path to save interactive HTML plot. Defaults to None.
             dpi (int, optional): DPI for saved plot. Defaults to 300.
             width (int, optional): Width of the plot in pixels. Defaults to None.
             height (int, optional): Height of the plot in pixels. Defaults to None.
@@ -2151,22 +2146,27 @@ class PyDAS:
                                                'uniform', or 'peak'. Defaults to 'lttb'.
             memory_efficient (bool, optional): Use memory-efficient methods for very large datasets. Defaults to True.
             bin_size (tuple, optional): Bin size for 2D histogram (x_bins, y_bins). Defaults to None (auto).
+            sns_style (str, optional): Seaborn style theme. Defaults to None.
+            sns_bins (int, optional): Number of bins for Seaborn histplot. Defaults to 50.
+            sns_pthresh (float, optional): Threshold for Seaborn histplot. Defaults to 0.1.
+            sns_cmap (str, optional): Colormap for Seaborn histplot. Defaults to None.
+            sns_contour_levels (int, optional): Number of levels for Seaborn kdeplot. Defaults to 5.
+            sns_contour_color (str, optional): Color of contour lines for Seaborn kdeplot. Defaults to None.
+            sns_linewidths (float, optional): Line width for Seaborn kdeplot. Defaults to None.
             
         Returns:
             tuple: (pandas.DataFrame with x and y data, figure object)
         """
         try:
-            # 验证通道并转换为通道名称
+            # 验证X和Y通道并转换为通道名称
             x_ch_name = validate_channel(self, x_ch_idx)
-            if x_ch_name is None:
-                return None
-                
             y_ch_name = validate_channel(self, y_ch_idx)
-            if y_ch_name is None:
+            
+            if x_ch_name is None or y_ch_name is None:
                 return None
             
             # 调用plot模块的plot_xy函数
-            plot_xy(
+            return plot_xy(
                 pydas_obj=self,
                 x_ch_name=x_ch_name,
                 y_ch_name=y_ch_name,
@@ -2179,7 +2179,7 @@ class PyDAS:
                 grid=grid,
                 show=show,
                 save_path=save_path,
-                use_plotly=use_plotly,
+                plotbackend=plotbackend,
                 save_html=save_html,
                 dpi=dpi,
                 width=width,
@@ -2205,10 +2205,15 @@ class PyDAS:
                 contour_levels=contour_levels,
                 sampling_algorithm=sampling_algorithm,
                 memory_efficient=memory_efficient,
-                bin_size=bin_size
+                bin_size=bin_size,
+                sns_style=sns_style,
+                sns_bins=sns_bins,
+                sns_pthresh=sns_pthresh,
+                sns_cmap=sns_cmap,
+                sns_contour_levels=sns_contour_levels,
+                sns_contour_color=sns_contour_color,
+                sns_linewidths=sns_linewidths
             )
-            return None
-            
         except ImportError as e:
             logger.error(f"Plot module not found: {str(e)}")
             return None
@@ -2328,7 +2333,7 @@ class PyDAS:
             return None
 
     def spectral_analysis(self, channel_name, method='cov', L=1024, plot=False, title=None, 
-                         show=True, save_path=None, use_plotly=True, save_html=None,
+                         save_path=None, plotbackend=None, save_html=None,
                          fullscale=False, lam=None, rho=1.025, g=9.807, freq_range=(0, 2)):
         """
         Perform spectral analysis on a single channel and return a spectral data object.
@@ -2336,11 +2341,11 @@ class PyDAS:
         
         See analysis.spectral_analysis for full documentation.
         """
-        return spectral_analysis(self, channel_name, method, L, plot, title, show, save_path, 
-                               use_plotly, save_html, fullscale, lam, rho, g, freq_range)
+        return spectral_analysis(self, channel_name, method, L, plot, title, save_path, 
+                               plotbackend, save_html, fullscale, lam, rho, g, freq_range)
     
     def statistic_analysis(self, ch_name, sseg=0, advanced=False, visualization=False, bins=50, 
-                          save_fig=False, save_path=None, use_plotly=False, fullscale=False, lam=None, 
+                          save_fig=False, save_path=None, plotbackend=None, fullscale=False, lam=None, 
                           rho=1.025, g=9.807):
         """
         对通道进行时域统计分析。此方法调用analysis模块中的statistic_analysis函数。
@@ -2361,8 +2366,8 @@ class PyDAS:
             是否保存图形，默认为False
         save_path : str, optional
             图形保存路径，默认为None（当前目录）
-        use_plotly : bool, optional
-            是否使用plotly进行可视化，默认为False
+        plotbackend : str, optional
+            绘图后端 ('plotly', 'matplotlib', 'seaborn' 或 None 自动选择)，默认为None
         fullscale : bool, optional
             是否转换为原型尺度，默认为False
         lam : float, optional
@@ -2379,7 +2384,7 @@ class PyDAS:
             lam = self.__lam__
             
         return statistic_analysis(self, ch_name, sseg, advanced, visualization, bins, 
-                                save_fig, save_path, use_plotly, fullscale, lam, rho, g)
+                                save_fig, save_path, plotbackend, fullscale, lam, rho, g)
 
     def print_statistics(self, printTxt=False, printExcel=False):
         """

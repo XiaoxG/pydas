@@ -22,9 +22,10 @@ import pandas as pd
 import scipy.stats as stats
 from logger import logger
 from waveModel.timeseries import TimeSeries
+from plot import _plot_statistics_mpl, _plot_statistics_plotly
 
 def spectral_analysis(pydas_obj, channel_name, method='cov', L=1024, plot=False, title=None, 
-                      show=True, save_path=None, use_plotly=True, save_html=None,
+                      save_path=None, plotbackend=None, save_html=None,
                       fullscale=False, lam=None, rho=1.025, g=9.807, freq_range=(0, 2)):
     """
     Perform spectral analysis on a single channel and return a spectral data object
@@ -47,8 +48,8 @@ def spectral_analysis(pydas_obj, channel_name, method='cov', L=1024, plot=False,
         Whether to display the plot, default is True
     save_path : str, optional
         Path to save the plot, default is None
-    use_plotly : bool, optional
-        Use Plotly for interactive plotting, default is True
+    plotbackend : str, optional
+        The plotting backend to use: 'plotly', 'matplotlib', 'seaborn' or None (auto), default is None
     save_html : str, optional
         Path to save interactive HTML plot, default is None
     fullscale : bool, optional
@@ -56,9 +57,9 @@ def spectral_analysis(pydas_obj, channel_name, method='cov', L=1024, plot=False,
     lam : float, optional
         Scale factor, used only when fullscale=True, default uses object's __lam__ attribute
     rho : float, optional
-        Water density (kg/m³), default is 1.025
+        Water density (kg/m3), default is 1.025
     g : float, optional
-        Gravitational acceleration (m/s²), default is 9.807
+        Gravitational acceleration (m/s2), default is 9.807
     freq_range : tuple, optional
         Frequency range in full scale (rad/s), default is (0, 2)
         
@@ -194,6 +195,17 @@ def spectral_analysis(pydas_obj, channel_name, method='cov', L=1024, plot=False,
             title_prefix = "Full Scale " if fullscale else ""
             title = f"{title_prefix}Spectrum of {channel_name}"
         
+        if plotbackend is None:
+            # Auto-detect: use Plotly if available, else Matplotlib
+            try:
+                import plotly
+                use_plotly = True
+            except ImportError:
+                use_plotly = False
+        else:
+            # Use specified backend
+            use_plotly = plotbackend.lower() == 'plotly'
+        
         if use_plotly:
             # Use Plotly for plotting
             try:
@@ -232,8 +244,9 @@ def spectral_analysis(pydas_obj, channel_name, method='cov', L=1024, plot=False,
                 # Save or display figure
                 if save_html:
                     fig.write_html(save_html)
-                if show:
-                    fig.show()
+                
+                fig.show()
+
             except ImportError:
                 logger.warning("Plotly not installed, will use Matplotlib")
                 use_plotly = False
@@ -258,18 +271,16 @@ def spectral_analysis(pydas_obj, channel_name, method='cov', L=1024, plot=False,
             ax.text(0.02, 0.98, range_text, transform=ax.transAxes, 
                    fontsize=9, va='top', ha='left',
                    bbox=dict(facecolor='white', alpha=0.8, pad=2))
-            
+            plt.show()
             if save_path:
-                plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            if show:
-                plt.show()
+                plt.savefig(save_path, dpi=300, bbox_inches='tight')   
             else:
                 plt.close()
     
     return spec
 
 def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization=False, bins=50, 
-                       save_fig=False, save_path=None, use_plotly=False, fullscale=False, lam=None, 
+                       save_fig=False, save_path=None, plotbackend=None, fullscale=False, lam=None, 
                        rho=1.025, g=9.807):
     """
     对通道进行时域统计分析
@@ -292,8 +303,8 @@ def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization
         是否保存图形，默认为False
     save_path : str, optional
         图形保存路径，默认为None（当前目录）
-    use_plotly : bool, optional
-        是否使用plotly进行可视化，默认为False
+    plotbackend : str, optional
+        The plotting backend to use: 'plotly', 'matplotlib', 'seaborn' or None (auto), default is None
     fullscale : bool, optional
         是否转换为原型尺度，默认为False
     lam : float, optional
@@ -450,310 +461,38 @@ def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization
     
     # 可视化
     if visualization:
-        title_prefix = "Full Scale " if fullscale else ""
-        title = f"{title_prefix}Statistical Analysis for {ch_name}"
-        
-        if use_plotly:
-            _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, 
-                                   data=data, title_override=title)
-        else:
-            _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, 
-                                data=data, title_override=title)
+        logger.info("Visualizing statistical results...")
+        try:
+            # Determine which backend to use
+            if plotbackend is None:
+                # Auto-detect: use Plotly if available, else Matplotlib
+                try:
+                    import plotly
+                    use_plotly = True
+                except ImportError:
+                    use_plotly = False
+            else:
+                # Use specified backend
+                use_plotly = plotbackend.lower() == 'plotly'
+            
+            # Call appropriate plotting function
+            if use_plotly:
+                try:
+                    _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, 
+                                           data=data, title_override=f"Full Scale Statistical Analysis for {ch_name}" if fullscale else None)
+                except Exception as e:
+                    logger.warning(f"Error using Plotly for visualization: {e}. Falling back to Matplotlib.")
+                    _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, 
+                                        data=data, title_override=f"Full Scale Statistical Analysis for {ch_name}" if fullscale else None)
+            else:
+                _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, 
+                                   data=data, title_override=f"Full Scale Statistical Analysis for {ch_name}" if fullscale else None)
+        except Exception as e:
+            logger.error(f"Error in statistical visualization: {e}")
     
     # 输出统计结果
     scale_info = "原型尺度" if fullscale else "模型尺度"
     logger.info(f"统计分析结果 ({scale_info}):")
     logger.info("\n" + stats_df.to_string(float_format=lambda x: f"% .4E" % x))
     
-    return stats_df
-
-def _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, data=None, title_override=None):
-    """使用matplotlib绘制统计分析图"""
-    import matplotlib.pyplot as plt
-    import scipy.stats as stats
-    import numpy as np
-    
-    for name in ch_names:
-        # 创建一个2x2的子图布局
-        fig, axs = plt.subplots(2, 2, figsize=(12, 10))
-        
-        # 设置标题，如果有自定义标题则使用它
-        if title_override:
-            plt.suptitle(title_override, fontsize=16)
-        else:
-            plt.suptitle(f'Statistical Analysis for Channel: {name} (Segment {sseg})', fontsize=16)
-        
-        # 获取数据
-        if data is None:
-            data = pydas_obj.data[sseg][name].values
-        
-        # 1. 时间序列图
-        axs[0, 0].plot(data)
-        axs[0, 0].set_title('Time Series')
-        axs[0, 0].set_xlabel('Sample')
-        axs[0, 0].set_ylabel(f'{name} [{stats_df.loc[name, "Unit"]}]')
-        axs[0, 0].grid(True)
-        
-        # 添加统计信息文本框
-        stats_text = (f"Mean: {stats_df.loc[name, 'Mean']:.4E}\n"
-                     f"Std: {stats_df.loc[name, 'Std']:.4E}\n"
-                     f"RMS: {stats_df.loc[name, 'RMS']:.4E}\n"
-                     f"Range: {stats_df.loc[name, 'Range']:.4E}")
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        axs[0, 0].text(0.05, 0.95, stats_text, transform=axs[0, 0].transAxes, 
-                       fontsize=9, verticalalignment='top', bbox=props)
-        
-        # 2. 直方图和PDF
-        hist, bin_edges = np.histogram(data, bins=bins, density=True)
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        
-        axs[0, 1].bar(bin_centers, hist, width=bin_centers[1]-bin_centers[0], 
-                     alpha=0.6, color='skyblue', label='Histogram')
-        
-        # 拟合正态分布
-        mu, sigma = stats.norm.fit(data)
-        x = np.linspace(min(data), max(data), 100)
-        pdf = stats.norm.pdf(x, mu, sigma)
-        axs[0, 1].plot(x, pdf, 'r-', lw=2, label=f'Normal PDF\n(μ={mu:.2E}, σ={sigma:.2E})')
-        
-        axs[0, 1].set_title('Histogram and PDF')
-        axs[0, 1].set_xlabel(f'{name} [{stats_df.loc[name, "Unit"]}]')
-        axs[0, 1].set_ylabel('Density')
-        axs[0, 1].legend()
-        axs[0, 1].grid(True)
-        
-        # 3. 经验累积分布函数（ECDF）
-        sorted_data = np.sort(data)
-        ecdf = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
-        
-        axs[1, 0].step(sorted_data, ecdf, where='post', label='ECDF')
-        
-        # 理论CDF
-        cdf = stats.norm.cdf(x, mu, sigma)
-        axs[1, 0].plot(x, cdf, 'r-', lw=2, label='Normal CDF')
-        
-        axs[1, 0].set_title('Empirical CDF')
-        axs[1, 0].set_xlabel(f'{name} [{stats_df.loc[name, "Unit"]}]')
-        axs[1, 0].set_ylabel('Probability')
-        axs[1, 0].grid(True)
-        axs[1, 0].legend()
-        
-        # 4. Q-Q图
-        stats.probplot(data, dist="norm", plot=axs[1, 1])
-        axs[1, 1].set_title('Q-Q Plot (Normal Distribution)')
-        axs[1, 1].grid(True)
-        
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
-        
-        if save_fig:
-            if save_path is None:
-                save_path = os.getcwd()
-            plt.savefig(f"{save_path}/{name}_seg{sseg}_stats.png", dpi=300, bbox_inches='tight')
-        
-        plt.show()
-
-def _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, data=None, title_override=None):
-    """使用plotly绘制统计分析图"""
-    try:
-        import plotly.graph_objects as go
-        import plotly.subplots as sp
-        import plotly.figure_factory as ff
-        import numpy as np
-        import scipy.stats as stats
-        
-        for name in ch_names:
-            # 创建子图
-            fig = sp.make_subplots(
-                rows=2, cols=2,
-                subplot_titles=(
-                    'Time Series', 
-                    'Histogram and PDF', 
-                    'Empirical CDF', 
-                    'Q-Q Plot (Normal Distribution)'
-                ),
-                specs=[[{'type': 'scatter'}, {'type': 'scatter'}],
-                      [{'type': 'scatter'}, {'type': 'scatter'}]],
-                vertical_spacing=0.1,
-                horizontal_spacing=0.1
-            )
-            
-            # 获取数据
-            if data is None:
-                data = pydas_obj.data[sseg][name].values
-            
-            # 1. 时间序列图
-            fig.add_trace(
-                go.Scatter(
-                    y=data,
-                    mode='lines',
-                    name='Time Series'
-                ),
-                row=1, col=1
-            )
-            
-            # 添加统计信息注释
-            stats_text = (f"Mean: {stats_df.loc[name, 'Mean']:.4E}<br>"
-                         f"Std: {stats_df.loc[name, 'Std']:.4E}<br>"
-                         f"RMS: {stats_df.loc[name, 'RMS']:.4E}<br>"
-                         f"Range: {stats_df.loc[name, 'Range']:.4E}")
-            
-            fig.add_annotation(
-                xref="x domain", yref="y domain",
-                x=0.05, y=0.95,
-                text=stats_text,
-                showarrow=False,
-                bgcolor="rgba(255, 255, 255, 0.8)",
-                bordercolor="rgba(0, 0, 0, 0.3)",
-                borderwidth=1,
-                borderpad=4,
-                font=dict(size=10),
-                row=1, col=1
-            )
-            
-            # 2. 直方图和PDF
-            hist, bin_edges = np.histogram(data, bins=bins, density=True)
-            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-            
-            # 直方图
-            fig.add_trace(
-                go.Bar(
-                    x=bin_centers,
-                    y=hist,
-                    name='Histogram',
-                    marker_color='skyblue',
-                    opacity=0.6
-                ),
-                row=1, col=2
-            )
-            
-            # 拟合正态分布
-            mu, sigma = stats.norm.fit(data)
-            x = np.linspace(min(data), max(data), 100)
-            pdf = stats.norm.pdf(x, mu, sigma)
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=x,
-                    y=pdf,
-                    mode='lines',
-                    name=f'Normal PDF (μ={mu:.2E}, σ={sigma:.2E})',
-                    line=dict(color='red', width=2)
-                ),
-                row=1, col=2
-            )
-            
-            # 3. 经验累积分布函数（ECDF）
-            sorted_data = np.sort(data)
-            ecdf = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=sorted_data,
-                    y=ecdf,
-                    mode='lines',
-                    line=dict(shape='hv'),
-                    name='ECDF'
-                ),
-                row=2, col=1
-            )
-            
-            # 理论CDF
-            cdf = stats.norm.cdf(x, mu, sigma)
-            fig.add_trace(
-                go.Scatter(
-                    x=x,
-                    y=cdf,
-                    mode='lines',
-                    name='Normal CDF',
-                    line=dict(color='red', width=2)
-                ),
-                row=2, col=1
-            )
-            
-            # 4. Q-Q图
-            # 计算理论分位数
-            theoretical_quantiles = np.random.normal(0, 1, len(data))
-            theoretical_quantiles.sort()
-            
-            # 计算样本分位数
-            sample_quantiles = np.sort(data)
-            
-            # 添加Q-Q线
-            fig.add_trace(
-                go.Scatter(
-                    x=theoretical_quantiles,
-                    y=sample_quantiles,
-                    mode='markers',
-                    name='Q-Q Plot',
-                    marker=dict(size=5)
-                ),
-                row=2, col=2
-            )
-            
-            # 理论Q-Q线
-            min_val = min(theoretical_quantiles)
-            max_val = max(theoretical_quantiles)
-            fig.add_trace(
-                go.Scatter(
-                    x=[min_val, max_val],
-                    y=[min_val * sigma + mu, max_val * sigma + mu],
-                    mode='lines',
-                    name='Theoretical Q-Q Line',
-                    line=dict(color='red', width=2)
-                ),
-                row=2, col=2
-            )
-            
-            # 更新布局
-            fig.update_layout(
-                title=title_override if title_override else f'Statistical Analysis for Channel: {name} (Segment {sseg})',
-                height=800,
-                width=1000,
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=-0.2,
-                    xanchor="center",
-                    x=0.5
-                )
-            )
-            
-            # 更新x轴标题
-            fig.update_xaxes(title_text="Sample", row=1, col=1)
-            fig.update_xaxes(title_text=f"{name} [{stats_df.loc[name, 'Unit']}]", row=1, col=2)
-            fig.update_xaxes(title_text=f"{name} [{stats_df.loc[name, 'Unit']}]", row=2, col=1)
-            fig.update_xaxes(title_text="Theoretical Quantiles", row=2, col=2)
-            
-            # 更新y轴标题
-            fig.update_yaxes(title_text=f"{name} [{stats_df.loc[name, 'Unit']}]", row=1, col=1)
-            fig.update_yaxes(title_text="Density", row=1, col=2)
-            fig.update_yaxes(title_text="Probability", row=2, col=1)
-            fig.update_yaxes(title_text="Sample Quantiles", row=2, col=2)
-            
-            # 保存和显示
-            if save_fig:
-                if save_path is None:
-                    save_path = os.getcwd()
-                
-                try:
-                    # 先尝试保存为HTML
-                    fig.write_html(f"{save_path}/{name}_seg{sseg}_stats.html")
-                    logger.info(f"Saved interactive plot to: {save_path}/{name}_seg{sseg}_stats.html")
-                    
-                    # 如果plotly.io可用，也可以保存为图像
-                    import plotly.io as pio
-                    pio.write_image(fig, f"{save_path}/{name}_seg{sseg}_stats.png")
-                    logger.info(f"Saved static plot to: {save_path}/{name}_seg{sseg}_stats.png")
-                except Exception as e:
-                    logger.warning(f"Could not save image: {str(e)}")
-                    logger.warning("Try installing the required packages: pip install -U kaleido")
-            
-            # 显示图形
-            fig.show()
-            
-    except ImportError as e:
-        logger.warning(f"Could not use plotly for visualization: {str(e)}")
-        logger.warning("Using matplotlib as fallback...")
-        _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, 
-                            data=data, title_override=title_override) 
+    return None 
