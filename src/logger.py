@@ -18,6 +18,27 @@ LOG_LEVELS = {
 # 创建logger
 logger = logging.getLogger('pydas')
 
+def get_logger(name):
+    """
+    Get a logger with the specified name.
+    
+    Parameters:
+    -----------
+    name : str
+        Name of the logger
+    
+    Returns:
+    --------
+    logging.Logger
+        Logger instance with the specified name
+    
+    Notes:
+    ------
+    - Returns a child logger of the PyDAS logger
+    - Inherits level and handlers from the parent logger
+    """
+    return logging.getLogger(name)
+
 def setup_logger(level='info'):
     """
     Configure the logger for the PyDAS system.

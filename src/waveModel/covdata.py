@@ -1,16 +1,16 @@
 import numpy as np
 from numpy.fft import fft
 from scipy.signal.windows import get_window, parzen
-from waveModel.core import nextpow2, sub_dict_select, JITImport
+from .core import nextpow2, sub_dict_select, JITImport
 import warnings
-from numpy import (zeros, ones, sqrt, inf, where, nan,
+from numpy import (zeros, sqrt, inf, where,
                    atleast_1d, hstack, r_, linspace, flatnonzero, size,
-                   isnan, finfo, diag, ceil, random, pi)
-from waveModel.dataframe import PlotData
+                   finfo, ceil, random, pi)
+from .dataframe import PlotData
 
 _specdata = JITImport('waveModel.specdata')
 
-from scipy import integrate, interpolate
+from scipy import interpolate
 
 def _set_seed(iseed):
     if iseed is not None:

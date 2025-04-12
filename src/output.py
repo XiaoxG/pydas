@@ -302,4 +302,216 @@ def export_to_mat(pydas_obj, sseg=0):
         return True
     except Exception as e:
         logger.error(f"Error exporting to MAT file: {str(e)}")
-        return False 
+        return False
+
+def export_to_parquet(pydas_obj, sseg='all', compression='zstd', compression_level=9):
+    """
+    Export data to Apache Parquet file format.
+    
+    Parameters:
+    -----------
+    pydas_obj : PyDAS
+        PyDAS object containing the data
+    sseg : int, list, or 'all', optional
+        Segment(s) to export, default is 'all'
+    compression : str, optional
+        Compression type to use. Options include: 'snappy', 'gzip', 'brotli', 'zstd', 'lz4', 'none'
+        Default is 'zstd' which offers a good balance between compression ratio and speed.
+    compression_level : int, optional
+        Compression level for 'gzip', 'brotli', and 'zstd' compressors.
+        Higher values mean better compression, but slower processing.
+        Default is 9 (range typically 1-22 for zstd).
+        
+    Returns:
+    --------
+    bool
+        True if export was successful, False otherwise
+        
+    Notes:
+    ------
+    The output file(s) will be named based on the original filename with segment number appended.
+    Parquet format is optimized for columnar data and offers excellent compression and read performance.
+    """
+    # Determine which segments to export
+    if sseg == 'all':
+        segments = list(range(pydas_obj.__segN__))
+    elif isinstance(sseg, int):
+        if sseg < pydas_obj.__segN__:
+            segments = [sseg]
+        else:
+            logger.warning(f"Segment {sseg} exceeds the maximum segment number ({pydas_obj.__segN__ - 1}).")
+            return False
+    elif isinstance(sseg, list):
+        segments = [s for s in sseg if s < pydas_obj.__segN__]
+        if len(segments) != len(sseg):
+            logger.warning("Some segment indices were invalid and will be skipped.")
+    else:
+        logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
+        return False
+    
+    # Verify compression options
+    valid_compressions = ['snappy', 'gzip', 'brotli', 'zstd', 'lz4', 'none']
+    if compression not in valid_compressions:
+        logger.warning(f"Invalid compression type. Using 'zstd' instead. Valid options are: {valid_compressions}")
+        compression = 'zstd'
+    
+    # Get base filename without extension
+    path = os.getcwd()
+    base_filename = os.path.splitext(pydas_obj.__filename__)[0]
+    
+    success = True
+    for idx in segments:
+        # Create output filename
+        parquet_filename = f"{path}/{base_filename}_seg{idx:02d}.parquet"
+        
+        try:
+            # Create metadata dictionary
+            metadata = {
+                'date': pydas_obj.__date__,
+                'fs': pydas_obj.__fs__,
+                'chN': pydas_obj.__chN__,
+                'scale': pydas_obj.__scale__,
+                'desc': pydas_obj.__desc__,
+                'segment_type': pydas_obj.segInfo['Type'][idx],
+                'segment_start': pydas_obj.segInfo['Start'][idx],
+                'segment_stop': pydas_obj.segInfo['Stop'][idx],
+                'segment_note': pydas_obj.segInfo['Note'][idx],
+                'n_sample': pydas_obj.segInfo['N sample'][idx],
+                'source': 'PyDAS from SKLOE/SJTU',
+                'channel_units': dict(zip(pydas_obj.chInfo['Name'], pydas_obj.chInfo['Unit']))
+            }
+            
+            # Create a copy of the DataFrame with metadata
+            df = pydas_obj.data[idx].copy()
+            
+            # Save to parquet file with specified compression
+            compression_args = {'compression': compression}
+            if compression in ['gzip', 'brotli', 'zstd']:
+                compression_args['compression_level'] = compression_level
+                
+            df.to_parquet(
+                parquet_filename,
+                engine='pyarrow',
+                index=False,
+                **compression_args
+            )
+            
+            # Save metadata separately as JSON file to maintain compatibility
+            # with systems that don't support Parquet metadata
+            metadata_filename = f"{path}/{base_filename}_seg{idx:02d}_metadata.json"
+            pd.Series(metadata).to_json(metadata_filename)
+            
+            logger.info(f"Data exported to: {parquet_filename}")
+            logger.info(f"Metadata exported to: {metadata_filename}")
+            
+        except Exception as e:
+            logger.error(f"Error exporting to Parquet file: {str(e)}")
+            success = False
+    
+    return success
+
+def export_to_feather(pydas_obj, sseg='all', compression='zstd'):
+    """
+    Export data to Feather file format.
+    
+    Parameters:
+    -----------
+    pydas_obj : PyDAS
+        PyDAS object containing the data
+    sseg : int, list, or 'all', optional
+        Segment(s) to export, default is 'all'
+    compression : str or None, optional
+        Compression type to use. Options include: 'zstd', 'lz4', 'uncompressed'
+        Default is 'zstd' which offers good compression and very fast read/write performance.
+        
+    Returns:
+    --------
+    bool
+        True if export was successful, False otherwise
+        
+    Notes:
+    ------
+    The output file(s) will be named based on the original filename with segment number appended.
+    Feather format provides extremely fast read and write performance with pandas DataFrames.
+    It is particularly well-suited for temporary storage and data exchange between Python and R.
+    """
+    # Determine which segments to export
+    if sseg == 'all':
+        segments = list(range(pydas_obj.__segN__))
+    elif isinstance(sseg, int):
+        if sseg < pydas_obj.__segN__:
+            segments = [sseg]
+        else:
+            logger.warning(f"Segment {sseg} exceeds the maximum segment number ({pydas_obj.__segN__ - 1}).")
+            return False
+    elif isinstance(sseg, list):
+        segments = [s for s in sseg if s < pydas_obj.__segN__]
+        if len(segments) != len(sseg):
+            logger.warning("Some segment indices were invalid and will be skipped.")
+    else:
+        logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
+        return False
+    
+    # Verify compression options
+    valid_compressions = ['zstd', 'lz4', 'uncompressed', None]
+    if compression not in valid_compressions:
+        logger.warning(f"Invalid compression type. Using 'zstd' instead. Valid options are: {valid_compressions}")
+        compression = 'zstd'
+    
+    # Get base filename without extension
+    path = os.getcwd()
+    base_filename = os.path.splitext(pydas_obj.__filename__)[0]
+    
+    success = True
+    for idx in segments:
+        # Create output filename
+        feather_filename = f"{path}/{base_filename}_seg{idx:02d}.feather"
+        
+        try:
+            # Create a copy of the DataFrame
+            df = pydas_obj.data[idx].copy()
+            
+            # Create metadata dictionary
+            metadata = {
+                'date': pydas_obj.__date__,
+                'fs': pydas_obj.__fs__,
+                'chN': pydas_obj.__chN__,
+                'scale': pydas_obj.__scale__,
+                'desc': pydas_obj.__desc__,
+                'segment_type': pydas_obj.segInfo['Type'][idx],
+                'segment_start': pydas_obj.segInfo['Start'][idx],
+                'segment_stop': pydas_obj.segInfo['Stop'][idx],
+                'segment_note': pydas_obj.segInfo['Note'][idx],
+                'n_sample': pydas_obj.segInfo['N sample'][idx],
+                'source': 'PyDAS from SKLOE/SJTU',
+                'channel_units': dict(zip(pydas_obj.chInfo['Name'], pydas_obj.chInfo['Unit']))
+            }
+            
+            # Add metadata as additional columns with prefix 'metadata_'
+            # This is a workaround since Feather doesn't support metadata directly
+            for key, value in metadata.items():
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    df[f"__metadata_{key}__"] = value
+            
+            # Save to feather file with specified compression
+            if compression == 'uncompressed':
+                compression = None
+                
+            df.to_feather(
+                feather_filename,
+                compression=compression
+            )
+            
+            logger.info(f"Data exported to: {feather_filename}")
+            
+            # For more complex metadata that can't be stored in the feather file
+            # Save as separate JSON
+            metadata_filename = f"{path}/{base_filename}_seg{idx:02d}_metadata.json"
+            pd.Series(metadata).to_json(metadata_filename)
+            logger.info(f"Full metadata exported to: {metadata_filename}")
+            
+        except Exception as e:
+            logger.error(f"Error exporting to Feather file: {str(e)}")
+            success = False
+    
+    return success 

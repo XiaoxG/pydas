@@ -6,9 +6,7 @@ This module contains plotting functions for PyDAS data.
 
 import logging
 import numpy as np
-import json
 import pandas as pd
-from typing import Union, List, Tuple, Optional, Dict, Any
 
 # Set up logging
 logger = logging.getLogger('pydas.plot')
@@ -79,9 +77,10 @@ def validate_channel(pydas_obj, ch_idx):
 
 def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylabel=None, 
               xlim=None, ylim=None, grid=True, show=True, save_path=None, 
-              use_plotly=True, downsampling=True, max_points=40000, save_html=None,
+              use_plotly=True, downsampling=False, max_points=40000, save_html=None,
               dpi=300, width=None, height=None, color=None, alpha=0.8, linewidth=1, 
-              figsize=(12, 4), stats=True, table_width=0.3, column_widths=None):
+              figsize=(12, 4), stats=True, table_width=0.3, column_widths=None,
+              use_dask=True, use_webgl=True, chunk_size=10000, data_decimation='auto'):
     """
     Plot a channel from a PyDAS object, with options for interactive web-based plotting.
     
@@ -98,7 +97,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
         show (bool): Whether to display the plot (default: True)
         save_path (str): Path to save the plot (default: None)
         use_plotly (bool): Use Plotly for interactive web-based plotting (default: True)
-        downsampling (bool): Whether to downsample large datasets (default: True)
+        downsampling (bool): Whether to downsample large datasets (default: False)
         max_points (int): Maximum number of points to plot before downsampling (default: 40000)
         save_html (str): Path to save as interactive HTML (default: None)
         dpi (int): DPI for saved image (default: 300)
@@ -111,6 +110,10 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
         stats (bool): Whether to include statistics (default: True)
         table_width (float): Width of the statistics table (default: 0.3)
         column_widths (list): Column widths for statistics table (default: None)
+        use_dask (bool): Use Dask for large data processing (default: True)
+        use_webgl (bool): Use WebGL for Plotly rendering for better performance (default: True)
+        chunk_size (int): Chunk size for Dask processing (default: 10000)
+        data_decimation (str or int): Decimation method for large datasets ('auto', 'lttb', or an integer for step) (default: 'auto')
     
     Returns:
         Figure object (matplotlib.figure.Figure or plotly.graph_objects.Figure)
@@ -157,8 +160,10 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     import matplotlib.pyplot as plt
                     from matplotlib import cm
                     colors = cm.get_cmap('tab10', len(channel_list))
-                    color_list = [f'rgb({int(255*r)},{int(255*g)},{int(255*b)})' 
-                                 for r, g, b in colors(range(len(channel_list)))]
+                    color_list = []
+                    for i in range(len(channel_list)):
+                        rgba = colors(i)
+                        color_list.append(f'rgb({int(255*rgba[0])},{int(255*rgba[1])},{int(255*rgba[2])})')
                 elif not is_list and color is None:
                     color_list = ['blue']
                 elif isinstance(color, list):
@@ -175,32 +180,104 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     
                     # Get data
                     y_data = pydas_obj.data[sseg][channel]
+                    data_length = len(y_data)
                     
                     # Get X-axis data (time)
-                    x_data = np.arange(len(y_data)) / pydas_obj.__fs__
+                    x_data = np.arange(data_length) / pydas_obj.__fs__
                     
                     # Store data for statistics calculation
                     stats_data[channel] = {
-                        'x': x_data.tolist(),
-                        'y': y_data.tolist(),
                         'unit': pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]['Unit'].values[0]
                     }
                     
-                    # Apply downsampling if needed and enabled
-                    if downsampling and len(y_data) > max_points:
-                        logger.info(f"Downsampling channel '{channel}' from {len(y_data)} to {max_points} points for plotting.")
+                    # Use Dask for large datasets if enabled
+                    very_large_data = data_length > 100000
+                    extremely_large_data = data_length > 1000000
+                    
+                    if use_dask and very_large_data:
+                        try:
+                            import dask.dataframe as dd
+                            import dask.array as da
+                            
+                            # If the data is extremely large, calculate stats with Dask
+                            if stats:
+                                # Create dask series for efficient computation
+                                ds = dd.from_pandas(y_data, chunksize=chunk_size)
+                                stats_data[channel]['mean'] = ds.mean().compute()
+                                stats_data[channel]['min'] = ds.min().compute()
+                                stats_data[channel]['max'] = ds.max().compute()
+                                stats_data[channel]['std'] = ds.std().compute()
+                            
+                            # Handle decimation for extremely large datasets
+                            if extremely_large_data or downsampling:
+                                if data_decimation == 'auto':
+                                    # Use LTTB algorithm for large datasets
+                                    if data_length > max_points:
+                                        logger.info(f"Using LTTB downsampling for channel '{channel}' from {data_length} to {max_points} points.")
+                                        x_down, y_down = _lttb_downsample(x_data, y_data.values, max_points)
+                                        x_data, y_data = x_down, y_down
+                                elif data_decimation == 'lttb':
+                                    # Force LTTB algorithm
+                                    logger.info(f"Using LTTB downsampling for channel '{channel}' from {data_length} to {max_points} points.")
+                                    x_down, y_down = _lttb_downsample(x_data, y_data.values, max_points)
+                                    x_data, y_data = x_down, y_down
+                                elif isinstance(data_decimation, int):
+                                    # Use step-based decimation with specific step
+                                    step = data_decimation
+                                    logger.info(f"Using step-based downsampling for channel '{channel}' with step {step}.")
+                                    x_data = x_data[::step]
+                                    y_data = y_data.iloc[::step]
+                                else:
+                                    # Default to standard downsampling if enabled
+                                    if downsampling and data_length > max_points:
+                                        step = int(data_length / max_points)
+                                        logger.info(f"Using uniform downsampling for channel '{channel}' from {data_length} to ~{data_length//step} points.")
+                                        x_data = x_data[::step]
+                                        y_data = y_data.iloc[::step]
+                            
+                        except ImportError:
+                            logger.warning("Dask not available. Falling back to pandas.")
+                            if downsampling and data_length > max_points:
+                                # Standard downsampling
+                                step = int(data_length / max_points)
+                                logger.info(f"Downsampling channel '{channel}' from {data_length} to ~{data_length//step} points.")
+                                x_data = x_data[::step]
+                                y_data = y_data.iloc[::step]
+                            
+                            # Calculate stats with pandas
+                            if stats:
+                                stats_data[channel]['mean'] = y_data.mean()
+                                stats_data[channel]['min'] = y_data.min()
+                                stats_data[channel]['max'] = y_data.max()
+                                stats_data[channel]['std'] = y_data.std()
+                    else:
+                        # Standard approach for smaller datasets
+                        if downsampling and data_length > max_points:
+                            # Standard downsampling
+                            step = int(data_length / max_points)
+                            logger.info(f"Downsampling channel '{channel}' from {data_length} to ~{data_length//step} points.")
+                            x_data = x_data[::step]
+                            y_data = y_data.iloc[::step]
                         
-                        # Simple uniform downsampling
-                        step = int(len(y_data) / max_points)
-                        x_data = x_data[::step]
-                        y_data = y_data.iloc[::step]
+                        # Calculate stats with pandas
+                        if stats:
+                            stats_data[channel]['mean'] = y_data.mean()
+                            stats_data[channel]['min'] = y_data.min()
+                            stats_data[channel]['max'] = y_data.max()
+                            stats_data[channel]['std'] = y_data.std()
                     
                     # Get channel unit for y-axis label
                     unit = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]['Unit'].values[0]
                     
-                    # Add trace to the figure
+                    # Add trace to the figure - use ScatterGL for better performance with large datasets
+                    if use_webgl and len(x_data) > 5000:
+                        import plotly.graph_objects as go
+                        scatter_type = go.Scattergl
+                    else:
+                        scatter_type = go.Scatter
+                    
                     fig.add_trace(
-                        go.Scatter(
+                        scatter_type(
                             x=x_data,
                             y=y_data,
                             name=f"{channel} ({unit})",
@@ -227,31 +304,36 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     units = []
                     
                     for channel in stats_data:
-                        y_data = np.array(stats_data[channel]['y'])
                         ch_names.append(channel)
-                        mean = np.mean(y_data)
-                        mean_values.append(f"{mean:.4g}")
-                        max_values.append(f"{np.max(y_data):.4g}")
-                        min_values.append(f"{np.min(y_data):.4g}")
-                        std_values.append(f"{np.std(y_data):.4g}")
+                        mean_values.append(f"{stats_data[channel].get('mean', 'N/A'):.2g}")
+                        max_values.append(f"{stats_data[channel].get('max', 'N/A'):.2g}")
+                        min_values.append(f"{stats_data[channel].get('min', 'N/A'):.2g}")
+                        std_values.append(f"{stats_data[channel].get('std', 'N/A'):.2g}")
                         units.append(stats_data[channel]['unit'])
                     
                     # Create table
                     fig.add_trace(
                         go.Table(
                             header=dict(
-                                values=["Channel", "Mean", "Max", "Min", "Std", "Unit"],
+                                values=["Ch.", "Mean", "Max", "Min", "Std", "Unit"],
                                 font=dict(size=12),
-                                align="left"
+                                align="center"
                             ),
                             cells=dict(
                                 values=[ch_names, mean_values, max_values, min_values, std_values, units],
                                 font=dict(size=11),
-                                align="left"
+                                align="center"
                             ),
                             domain=dict(x=[0, table_width], y=[0, 0.2])
                         )
                     )
+                
+                # Create a settings dict to be applied to each plot
+                plot_settings = {
+                    "scrollZoom": True,  # Enable mouse scroll for zooming
+                    "modeBarButtonsToAdd": ["drawopenpath", "eraseshape"],  # Add drawing tools
+                    "modeBarButtonsToRemove": ["lasso2d"]  # Remove lasso selection
+                }
                 
                 # Set plot title
                 if title is None:
@@ -284,7 +366,9 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     width=width,
                     height=height,
                     grid=dict(rows=1, columns=1, pattern="independent"),
-                    margin=dict(l=50, r=50, t=50, b=50)
+                    margin=dict(l=50, r=50, t=50, b=50),
+                    # Optimize for performance
+                    uirevision='constant'  # Maintain zoom level on updates
                 )
                 
                 # Update axes
@@ -299,7 +383,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 
                 # Save as HTML if requested
                 if save_html is not None:
-                    fig.write_html(save_html)
+                    fig.write_html(save_html, config=plot_settings)
                     logger.info(f"Interactive plot saved to {save_html}")
                 
                 # Save as image if requested
@@ -309,7 +393,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 
                 # Show plot if requested
                 if show:
-                    fig.show()
+                    fig.show(config=plot_settings)
                 
                 plot_created = True
                 
@@ -330,7 +414,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 
                 # Create color palette for multiple channels
                 if is_list and color is None:
-                    colors = plt.cm.tab10(np.linspace(0, 1, len(channel_list)))
+                    colors = [plt.cm.tab10(i % 10) for i in range(len(channel_list))]
                 elif not is_list and color is None:
                     colors = ['blue']
                 elif isinstance(color, list):
@@ -347,18 +431,63 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     
                     # Get data
                     y_data = pydas_obj.data[sseg][channel]
+                    data_length = len(y_data)
                     
                     # Get X-axis data (time)
-                    x_data = np.arange(len(y_data)) / pydas_obj.__fs__
+                    x_data = np.arange(data_length) / pydas_obj.__fs__
                     
-                    # Apply downsampling if needed and enabled
-                    if downsampling and len(y_data) > max_points:
-                        logger.info(f"Downsampling channel '{channel}' from {len(y_data)} to {max_points} points for plotting.")
-                        
-                        # Simple uniform downsampling
-                        step = int(len(y_data) / max_points)
-                        x_data = x_data[::step]
-                        y_data = y_data.iloc[::step]
+                    # Use Dask for large datasets if enabled
+                    very_large_data = data_length > 100000
+                    extremely_large_data = data_length > 1000000
+                    
+                    if use_dask and very_large_data:
+                        try:
+                            import dask.dataframe as dd
+                            import dask.array as da
+                            
+                            # Handle decimation for extremely large datasets
+                            if extremely_large_data or downsampling:
+                                if data_decimation == 'auto':
+                                    # Use LTTB algorithm for large datasets
+                                    if data_length > max_points:
+                                        logger.info(f"Using LTTB downsampling for channel '{channel}' from {data_length} to {max_points} points.")
+                                        x_down, y_down = _lttb_downsample(x_data, y_data.values, max_points)
+                                        x_data, y_data = x_down, y_down
+                                elif data_decimation == 'lttb':
+                                    # Force LTTB algorithm
+                                    logger.info(f"Using LTTB downsampling for channel '{channel}' from {data_length} to {max_points} points.")
+                                    x_down, y_down = _lttb_downsample(x_data, y_data.values, max_points)
+                                    x_data, y_data = x_down, y_down
+                                elif isinstance(data_decimation, int):
+                                    # Use step-based decimation with specific step
+                                    step = data_decimation
+                                    logger.info(f"Using step-based downsampling for channel '{channel}' with step {step}.")
+                                    x_data = x_data[::step]
+                                    y_data = y_data.iloc[::step]
+                                else:
+                                    # Default to standard downsampling if enabled
+                                    if downsampling and data_length > max_points:
+                                        step = int(data_length / max_points)
+                                        logger.info(f"Using uniform downsampling for channel '{channel}' from {data_length} to ~{data_length//step} points.")
+                                        x_data = x_data[::step]
+                                        y_data = y_data.iloc[::step]
+                            
+                        except ImportError:
+                            logger.warning("Dask not available. Falling back to pandas.")
+                            if downsampling and data_length > max_points:
+                                # Standard downsampling
+                                step = int(data_length / max_points)
+                                logger.info(f"Downsampling channel '{channel}' from {data_length} to ~{data_length//step} points.")
+                                x_data = x_data[::step]
+                                y_data = y_data.iloc[::step]
+                    else:
+                        # Standard approach for smaller datasets
+                        if downsampling and data_length > max_points:
+                            # Simple uniform downsampling
+                            step = int(data_length / max_points)
+                            logger.info(f"Downsampling channel '{channel}' from {data_length} to ~{data_length//step} points.")
+                            x_data = x_data[::step]
+                            y_data = y_data.iloc[::step]
                     
                     # Get channel unit for label
                     unit = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]['Unit'].values[0]
@@ -366,12 +495,6 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     # Plot data
                     ax.plot(x_data, y_data, label=f"{channel} ({unit})", 
                            color=colors[i], linewidth=linewidth, alpha=alpha)
-                
-                # If no channels were plotted successfully
-                if len(ax.lines) == 0:
-                    logger.error("No valid channels to plot.")
-                    plt.close(fig)
-                    return None
                 
                 # Set plot title
                 if title is None:
@@ -395,48 +518,39 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 # Set grid
                 ax.grid(grid)
                 
-                # Add legend for multiple channels
-                if is_list:
-                    ax.legend()
-                
                 # Set axis limits if provided
                 if xlim is not None:
                     ax.set_xlim(xlim)
                 if ylim is not None:
                     ax.set_ylim(ylim)
                 
-                # Add statistics table if requested
+                # Add statistical information if requested
                 if stats:
-                    # Create statistics table
-                    stats_data = []
-                    for channel in channel_list:
-                        if channel in pydas_obj.data[sseg].columns:
-                            y_data = pydas_obj.data[sseg][channel]
-                            unit = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]['Unit'].values[0]
-                            stats_data.append([
-                                channel,
-                                f"{np.mean(y_data):.2g}",
-                                f"{np.max(y_data):.2g}",
-                                f"{np.min(y_data):.2g}",
-                                f"{np.std(y_data):.2g}",
-                                unit
-                            ])
+                    # Calculate statistics
+                    x_mean = np.mean(x_data)
+                    y_mean = np.mean(y_data)
+                    x_std = np.std(x_data)
+                    y_std = np.std(y_data)
+                    x_min = np.min(x_data)
+                    y_min = np.min(y_data)
+                    x_max = np.max(x_data)
+                    y_max = np.max(y_data)
+                    corr = np.corrcoef(x_data, y_data)[0, 1]
                     
-                    # Add table to plot
-                    if stats_data:
-                        table = ax.table(
-                            cellText=stats_data,
-                            colLabels=["Ch.", "Mean", "Max", "Min", "Std", "Unit"],
-                            cellLoc='center',
-                            loc='bottom',
-                            bbox=[0, -0.3, 1, 0.2]
-                        )
-                        table.auto_set_font_size(False)
-                        table.set_fontsize(9)
-                        table.scale(1, 1.5)
-                        
-                        # Adjust figure to make room for table
-                        plt.subplots_adjust(bottom=0.2)
+                    # Create stats string
+                    stats_text = (
+                        f"{x_data.name}: μ={x_mean:.4g}, σ={x_std:.4g}, min={x_min:.4g}, max={x_max:.4g}\n"
+                        f"{y_data.name}: μ={y_mean:.4g}, σ={y_std:.4g}, min={y_min:.4g}, max={y_max:.4g}\n"
+                        f"Correlation: {corr:.4g}"
+                    )
+                    
+                    # Add stats text to plot
+                    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes,
+                           verticalalignment='top', horizontalalignment='left',
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+                
+                # Adjust layout
+                plt.tight_layout()
                 
                 # Save figure if requested
                 if save_path is not None:
@@ -551,8 +665,10 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
                     import matplotlib.pyplot as plt
                     from matplotlib import cm
                     colors = cm.get_cmap('tab10', n_channels)
-                    color_list = [f'rgb({int(255*r)},{int(255*g)},{int(255*b)})' 
-                                 for r, g, b in colors(range(n_channels))]
+                    color_list = []
+                    for i in range(n_channels):
+                        rgba = colors(i)
+                        color_list.append(f'rgb({int(255*rgba[0])},{int(255*rgba[1])},{int(255*rgba[2])})')
                 elif not is_list and color is None:
                     color_list = ['blue']
                 elif isinstance(color, list):
@@ -633,7 +749,8 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
                         fit_text = f"μ = {mu:.4g}<br>σ = {sigma:.4g}"
                         fig.add_annotation(
                             x=0.95, y=0.95,
-                            xref=f"x{i+1}", yref=f"y{i+1}",
+                            xref="paper", yref="paper",
+                            xanchor="right", yanchor="top",
                             text=fit_text,
                             showarrow=False,
                             bgcolor="rgba(255, 255, 255, 0.7)",

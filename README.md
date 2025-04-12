@@ -8,34 +8,131 @@ PyDAS is a powerful Python library designed for analyzing and processing time se
 
 ## Project Structure
 
+PyDAS has been refactored to use a modular architecture, improving maintainability and organization:
+
 ```
 pydas/
-├── src/              # Main package directory
-│   ├── __init__.py   # Package initialization 
-│   ├── pydas.py      # Core functionality
-│   ├── pydas_plot.py # Plotting utilities
-│   └── waveModel/    # Wave modeling subpackage
+├── src/                    # Main package directory
+│   ├── __init__.py         # Package initialization
+│   ├── pydas.py            # Core PyDAS class and methods
+│   ├── process.py          # Data processing functions
+│   ├── plot.py             # Visualization functions
+│   ├── output.py           # Data export functions
+│   ├── utils.py            # Utility functions
+│   ├── logger.py           # Logging functionality
+│   └── waveModel/          # Wave modeling subpackage
 │       ├── __init__.py
-│       ├── core.py
-│       ├── specdata.py
-│       ├── specmodels.py
+│       ├── timeseries.py
 │       └── ...
-├── examples/         # Example scripts
-├── tests/            # Test suite
-├── docs/             # Documentation
-├── setup.py          # Installation script
-├── requirements.txt  # Dependencies
-└── README.md         # This file
+├── examples/               # Example scripts
+├── tests/                  # Test suite
+├── docs/                   # Documentation
+├── setup.py                # Installation script
+├── requirements.txt        # Dependencies
+└── README.md               # This file
 ```
+
+## Modules and Functions
+
+### Core Module (pydas.py)
+
+The `PyDAS` class is the main entry point for working with time series data:
+
+- **Initialization and Data Import**
+  - `__init__(filename, lam, sseg, log_level)`: Initialize PyDAS object and read data
+  - `__read__(sseg)`: Read data from file
+
+- **Channel Management**
+  - `add_channel(name, unit, series, fs, coef, point_of_move, sseg)`: Add a new channel
+  - `delete_channel(name)`: Delete a specified channel
+  - `select_channels(chnames)`: Select and keep specified channels
+  - `rename_channel(chOld, chNew, sseg)`: Rename a channel
+  - `change_channel_order(newOrder, sseg)`: Change the order of channels
+
+- **Data Alignment**
+  - `move_ccor(to_move_chName, base_chName, reference_ch, sseg)`: Move channel using cross-correlation
+  - `find_move_ccor(base_chName, reference_ch, sseg)`: Find points to move between channels
+  - `cut_series(start, stop, sseg)`: Cut time series to specified range
+
+- **Data Import**
+  - `read_waveCal(wavefname, sseg, YBname, YBcalname, alignFlag)`: Read wave calibration data
+  - `read_motion(motionfname, alignAccName, alignMethod, zerofilename, lowpassfilter, rotation, NameList)`: Read motion data
+
+- **Data Conversion**
+  - `fix_unit(chName, newunit, pInfo)`: Fix channel unit
+  - `to_fullscale(rho, g, pInfo)`: Convert model scale data to prototype scale
+  - `channel2fullscale(channel_name, lam, rho, g)`: Convert a single channel to fullscale
+
+- **Information Output**
+  - `print_info(printTxt, printExcel)`: Print basic information
+  - `print_channel_info(printTxt, printExcel)`: Print channel information
+  - `print_statistics(printTxt, printExcel)`: Print statistical information
+
+- **Data Maintenance**
+  - `updateST(chName, sseg)`: Update statistical information
+  - `updateChN(sseg)`: Update channel count
+
+### Process Module (process.py)
+
+Data processing functions for filtering, transformation, and cleaning:
+
+- **Filtering**
+  - `apply_lowpass_filter(pydas_obj, chName, cutoffull, replace, returnValue, sseg, order, plot)`: Apply lowpass filter
+  - `apply_highpass_filter(pydas_obj, chName, cutoffull, replace, returnValue, sseg, order, plot)`: Apply highpass filter
+
+- **Channel Data Processing**
+  - `remove_mean(pydas_obj, chName, sseg)`: Remove mean from channel data
+  - `add_value(pydas_obj, chName, value2add, sseg)`: Add constant value to channel data
+  - `multiply_value(pydas_obj, chName, value2mul, sseg)`: Multiply channel data by constant
+  - `move_data(pydas_obj, chName, point_of_move, sseg)`: Move channel data by specified points
+  - `data_wash(pydas_obj, ChName, method, order, threshold, sseg)`: Clean data by detecting and interpolating outliers
+
+- **Differential Operations**
+  - `add_diff1(pydas_obj, name, sseg, filter, filter_cutoff)`: Calculate and add first derivative
+  - `add_diff2(pydas_obj, name, sseg, filter, filter_cutoff)`: Calculate and add second derivative
+  - `diff1d(data, dt)`: Calculate derivative of one-dimensional array
+
+### Plot Module (plot.py)
+
+Visualization functions with support for interactive and high-performance rendering:
+
+- **Core Visualization**
+  - `plot_channel(pydas_obj, ch_name, sseg, title, xlabel, ylabel, ...)`: Plot channel data
+  - `plot_histogram(pydas_obj, ch_name, sseg, bins, fit_gaussian, ...)`: Generate histograms with statistics
+  - `plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg, ...)`: Create XY scatter plots
+
+- **Analysis Visualization**
+  - `spectral_analysis(pydas_obj, channel_name, method, L, plot, ...)`: Perform spectral analysis
+
+### Output Module (output.py)
+
+Functions for exporting data to various formats:
+
+- `write_data(pydas_obj, filename, sseg, ch)`: Write data to file
+- `export_to_dat(pydas_obj, Time, sseg)`: Export data to DAT format
+- `export_to_mat(pydas_obj, sseg)`: Export data to MAT format
+
+### Utils Module (utils.py)
+
+Utility functions for general data processing:
+
+- `data_change_fs(data, old_fs, new_fs)`: Change data sampling frequency
+
+### Logger Module (logger.py)
+
+Logging functionality for the PyDAS system:
+
+- `setup_logger(level)`: Configure the logger
+- `get_logger(name)`: Get a named logger
 
 ## Features
 
 - **Data Processing & Analysis**
   - Multiple data format support (DAT, MAT, CSV, etc.)
-  - Advanced filtering (lowpass, highpass, custom)
+  - Advanced filtering (lowpass, highpass)
   - Statistical analysis and data cleaning
-  - Downsampling and resampling capabilities
-  - Outlier detection and handling
+  - Outlier detection and interpolation
+  - Differential calculation and signal transformation
 
 - **Visualization**
   - Interactive time series plots
@@ -49,12 +146,8 @@ pydas/
   - Automatic downsampling for large datasets
   - Vectorized operations for faster processing
   - WebGL rendering for interactive visualization of large datasets
-
-- **Scientific Computing**
-  - Spectral density estimation
-  - Moment calculation for spectral analysis
-  - Cross-correlation between channels
-  - Signal derivatives and transformations
+  - Memory-mapped file reading for large datasets
+  - Chunk-based processing for huge datasets
 
 ## Installation
 
@@ -70,6 +163,12 @@ pip install -e .
 
 # Install with development dependencies
 pip install -e ".[dev]"
+
+# Install with high-performance dependencies for large datasets
+pip install -e ".[performance]"
+
+# Install with all dependencies
+pip install -e ".[dev,performance]"
 ```
 
 ### Requirements
@@ -82,6 +181,7 @@ PyDAS depends on the following packages:
 - plotly (≥5.0.0)
 - numba (≥0.50.0)
 - dask (≥2021.6.0)
+- distributed (≥2021.6.0)
 - kaleido (≥0.2.0)
 - scikit-learn (≥0.24.0)
 
@@ -89,35 +189,35 @@ PyDAS depends on the following packages:
 
 ```python
 from pydas import PyDAS
-import numpy as np
 
 # Load data file
-data = PyDAS(filename="your_data_file.csv")
+data = PyDAS(filename="your_data_file.out", lam=36)
 
 # Basic info
-print(f"Loaded data with {len(data.channels)} channels")
-print(f"Available channels: {data.channels}")
-print(f"Sampling frequency: {data.fs} Hz")
+data.print_info()
+
+# Print statistics
+data.print_statistics()
 
 # Plot a channel
 data.plot_channel("channel1", use_plotly=True, save_html="channel_plot.html")
 
 # Apply a filter
-data.apply_lowpass_filter("channel1", cutoff=2.0)  # 2.0 Hz cutoff
+data.apply_lowpass_filter("channel1", cutoffull=2.0)  # 2.0 Hz cutoff
 data.plot_channel("channel1", title="Filtered Data")
 
+# Add first derivative
+data.add_diff1("channel1", filter=True, filter_cutoff=2.0)
+data.plot_channel(["channel1", "channel1_d1"], title="Original and Derivative")
+
 # Perform spectral analysis
-spec, fig = data.spectral_analysis(
+data.spectral_analysis(
     channel_name="channel1",
     method="cov",  # Covariance method
     L=1024,        # Window size
+    plot=True,
     use_plotly=True
 )
-
-# Extract spectral characteristics
-m0 = float(spec.moment(0))
-print(f"Zeroth moment (m0): {m0:.5f}")
-print(f"Significant wave height: {4.0 * np.sqrt(m0):.5f}")
 ```
 
 ## Usage Examples
@@ -126,28 +226,43 @@ print(f"Significant wave height: {4.0 * np.sqrt(m0):.5f}")
 
 ```python
 # Add a new channel
-data.add_channel("new_channel", values=np.sin(np.linspace(0, 10*np.pi, len(data["channel1"]))), unit="m")
-
-# Add derivative of a channel
-data.add_diff1("channel1", new_ch_name="channel1_derivative")
+import numpy as np
+time = np.linspace(0, 10, int(data.__fs__ * 10))
+data.add_channel("new_channel", unit="m", series=np.sin(2 * np.pi * 0.5 * time), fs=data.__fs__)
 
 # Remove mean from a channel
 data.remove_mean("channel1")
 
+# Add a constant value to a channel
+data.add_value("channel1", value2add=1.5)
+
+# Multiply a channel by a constant
+data.multiply_value("channel1", value2mul=2.0)
+
+# Clean data (detect and interpolate outliers)
+data.data_wash("channel1", method="linear", threshold=3)
+
 # Cut time series to a specific range
-data.cut_series(start_t=10, end_t=50)  # Cut between 10s and 50s
+data.cut_series(start=10, stop=50)  # Cut between 10s and 50s
 ```
 
 ### Advanced Visualization
 
 ```python
-# Interactive time series plot with statistics
+# Interactive time series plot
 data.plot_channel(
     "channel1", 
     use_plotly=True, 
-    stats=True, 
-    downsampling=True, 
-    max_points=20000
+    stats=True
+)
+
+# Multiple channel plot
+data.plot_channel(
+    ["channel1", "channel2"],
+    use_plotly=True,
+    downsampling=True,     # Enable downsampling for large datasets
+    max_points=10000,      # Maximum number of points to plot
+    title="Multiple Channel Comparison"
 )
 
 # XY scatter plot with density visualization
@@ -156,7 +271,8 @@ data.plot_xy(
     y_ch_idx="channel2", 
     density_plot=True, 
     fit_line=True,
-    use_plotly=True
+    use_plotly=True,
+    use_webgl=True  # Improve rendering performance for large datasets
 )
 
 # Histogram with Gaussian fitting
@@ -164,201 +280,98 @@ data.plot_histogram(
     "channel1", 
     bins=50, 
     fit_gaussian=True, 
-    show_stats=True
-)
-
-# Multi-channel spectral analysis
-results = data.spectral_analysis(
-    channel_name=["channel1", "channel2", "channel3"], 
-    method="psd", 
-    subplot_layout=(2, 2),
     use_plotly=True
 )
 ```
 
-### Data Import and Export
+### Data Export
 
 ```python
-# Import data
-wave_data = PyDAS(filename="wave_data.csv")
-
 # Export to MAT file
-wave_data.to_mat("processed_data.mat")
+data.to_mat("processed_data.mat")
 
 # Export to DAT file
-wave_data.to_dat("processed_data.dat")
+data.to_dat("processed_data.dat")
 
-# Export to CSV
-wave_data.to_csv("processed_data.csv")
+# Write data file
+data.write("processed_data.out")
 ```
-
-### Using waveModel Directly
-
-The `waveModel` subpackage can be imported directly for spectral modeling and wave analysis:
-
-```python
-# Import the wave modeling subpackage
-import pydas.waveModel as wm
-
-# Create a JONSWAP spectrum
-freq = np.linspace(0.05, 2, 100)  # Frequency array in Hz
-Hs = 4.0  # Significant wave height in meters
-Tp = 10.0  # Peak period in seconds
-gamma = 3.3  # Peakedness parameter
-
-# Generate spectrum
-S = wm.jonswap(freq, Hs, Tp, gamma)
-
-# Calculate spectral moments
-m0 = wm.moment(freq, S, 0)  # Zeroth moment
-m1 = wm.moment(freq, S, 1)  # First moment
-m2 = wm.moment(freq, S, 2)  # Second moment
-
-# Calculate wave parameters
-Hm0 = 4.0 * np.sqrt(m0)  # Significant wave height
-Tm01 = m0/m1  # Mean period
-Tm02 = np.sqrt(m0/m2)  # Zero-crossing period
-
-print(f"Significant wave height: {Hm0:.2f} m")
-print(f"Mean period: {Tm01:.2f} s")
-print(f"Zero-crossing period: {Tm02:.2f} s")
-```
-
-### Full-Scale Analysis
-
-```python
-# Perform spectral analysis with model scale
-spec_model, fig_model = data.spectral_analysis(
-    channel_name="wave_height",
-    method="cov",
-    use_plotly=True,
-    title="Model Scale Spectrum"
-)
-
-# Perform full-scale spectral analysis (with scale factor λ)
-spec_full, fig_full = data.spectral_analysis(
-    channel_name="wave_height",
-    method="cov",
-    use_plotly=True,
-    fullscale=True,  # Enable full scale
-    title="Full Scale Spectrum"
-)
-
-# Compare results
-Hm0_model = 4.0 * np.sqrt(float(spec_model.moment(0)))
-Hm0_full = 4.0 * np.sqrt(float(spec_full.moment(0)))
-print(f"Model scale Hm0: {Hm0_model:.4f} m")
-print(f"Full scale Hm0: {Hm0_full:.4f} m")
-```
-
-## Development
-
-### Setting Up a Development Environment
-
-```bash
-# Clone the repository
-git clone https://gitee.com/xiaoxianguo/pydas.git
-cd pydas
-
-# Create and activate a virtual environment (optional but recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install in development mode with all extra dependencies
-pip install -e ".[dev]"
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/test_specific.py
-
-# Run with coverage report
-pytest --cov=pydas
-```
-
-### Code Style
-
-PyDAS follows PEP 8 style guidelines. You can check your code with:
-
-```bash
-# Check code style
-flake8 src tests
-
-# Auto-format code
-black src tests
-```
-
-## API Reference
-
-### Core Functions
-
-| Category | Function | Description |
-|----------|----------|-------------|
-| **Channel Operations** | `add_channel()` | Add a new channel to the dataset |
-| | `delete_channel()` | Delete a channel from the dataset |
-| | `select_channels()` | Select and keep specific channels |
-| | `rename_channel()` | Rename an existing channel |
-| | `change_channel_order()` | Change the order of channels |
-| **Data Processing** | `remove_mean()` | Remove mean value from channel data |
-| | `add_value()` | Add constant value to channel data |
-| | `multiply_value()` | Multiply channel data by constant value |
-| | `cut_series()` | Cut time series to specified range |
-| | `move_data()` | Move channel data by specified offset |
-| | `data_wash()` | Clean data, detect and interpolate outliers |
-| **Differential Operations** | `add_diff1()` | Calculate and add first derivative |
-| | `add_diff2()` | Calculate and add second derivative |
-| **Filtering** | `apply_lowpass_filter()` | Apply lowpass filter to channel data |
-| | `apply_highpass_filter()` | Apply highpass filter to channel data |
-| **Data Alignment** | `move_ccor()` | Move channel data using cross-correlation |
-| | `find_move_ccor()` | Find points to move between channels |
-| **Data Output** | `to_dat()` | Export data to DAT file |
-| | `to_mat()` | Export data to MAT file |
-| | `to_csv()` | Export data to CSV file |
-| | `write()` | Write data to generic file |
-| **Visualization** | `plot_channel()` | Plot channel time series |
-| | `plot_histogram()` | Generate histogram with statistics |
-| | `plot_xy()` | Create XY scatter plot |
-| | `spectral_analysis()` | Perform spectral analysis on channel |
-| **Data Conversion** | `fix_unit()` | Fix channel unit |
-| | `to_fullscale()` | Convert model scale data to prototype scale |
-
-### Utility Functions
-
-| Function | Description |
-|----------|-------------|
-| `diff1d()` | Calculate derivative of one-dimensional array |
-| `data_change_fs()` | Change data sampling frequency |
-| `print_info()` | Print basic information about dataset |
-| `print_channel_info()` | Print detailed channel information |
-| `print_statistics()` | Print statistical information for channels |
-| `updateST()` | Update statistical information for all channels |
-| `updateChN()` | Update channel count information |
-
-## Contributing
-
-Contributions to PyDAS are welcome! Here's how you can contribute:
-
-1. **Fork the Repository**: Create your own fork of the project
-2. **Create a Branch**: Make your changes in a new branch
-3. **Write Tests**: Add tests for new features or bug fixes
-4. **Follow Style Guidelines**: Ensure your code follows PEP 8
-5. **Submit a Pull Request**: Open a PR to merge your changes
-
-### Contribution Guidelines
-
-- Keep the code well-documented
-- Maintain backward compatibility when possible
-- Write unit tests for new features
-- Update documentation to reflect changes
 
 ## License
 
-MIT License
+PyDAS is distributed under the MIT License. See the LICENSE file for more information.
+
+## API Reference
+
+### Core Module (pydas.py)
+
+| Category | Function | Description |
+|----------|----------|-------------|
+| **Initialization** | `__init__(filename, lam, sseg, log_level)` | Initialize PyDAS object and read data file |
+| | `__read__(sseg)` | Read data from file |
+| **Channel Management** | `add_channel(name, unit, series, fs, ...)` | Add a new channel to the dataset |
+| | `delete_channel(name)` | Delete a channel from the dataset |
+| | `select_channels(chnames)` | Select and keep specified channels |
+| | `rename_channel(chOld, chNew, sseg)` | Rename an existing channel |
+| | `change_channel_order(newOrder, sseg)` | Change the order of channels |
+| **Data Alignment** | `move_ccor(to_move_chName, base_chName, reference_ch, sseg)` | Move channel using cross-correlation |
+| | `find_move_ccor(base_chName, reference_ch, sseg)` | Find points to move between channels |
+| | `cut_series(start, stop, sseg)` | Cut time series to specified range |
+| **Data Import** | `read_waveCal(wavefname, sseg, YBname, YBcalname, alignFlag)` | Read wave calibration data |
+| | `read_motion(motionfname, alignAccName, alignMethod, ...)` | Read motion data and add as channels |
+| **Data Conversion** | `fix_unit(chName, newunit, pInfo)` | Fix channel unit |
+| | `to_fullscale(rho, g, pInfo)` | Convert model scale data to prototype scale |
+| | `channel2fullscale(channel_name, lam, rho, g)` | Convert channel to fullscale |
+| **Information Output** | `print_info(printTxt, printExcel)` | Print basic information |
+| | `print_channel_info(printTxt, printExcel)` | Print channel information |
+| | `print_statistics(printTxt, printExcel)` | Print statistical information |
+| **Data Maintenance** | `updateST(chName, sseg)` | Update statistical information |
+| | `updateChN(sseg)` | Update channel count information |
+
+### Process Module (process.py)
+
+| Function | Description |
+|----------|-------------|
+| `apply_lowpass_filter(pydas_obj, chName, cutoffull, ...)` | Apply lowpass filter to channel data |
+| `apply_highpass_filter(pydas_obj, chName, cutoffull, ...)` | Apply highpass filter to channel data |
+| `remove_mean(pydas_obj, chName, sseg)` | Remove mean from channel data |
+| `add_value(pydas_obj, chName, value2add, sseg)` | Add constant value to channel data |
+| `multiply_value(pydas_obj, chName, value2mul, sseg)` | Multiply channel data by constant |
+| `move_data(pydas_obj, chName, point_of_move, sseg)` | Move channel data by specified points |
+| `data_wash(pydas_obj, ChName, method, order, threshold, sseg)` | Clean data by detecting and interpolating outliers |
+| `add_diff1(pydas_obj, name, sseg, filter, filter_cutoff)` | Calculate and add first derivative |
+| `add_diff2(pydas_obj, name, sseg, filter, filter_cutoff)` | Calculate and add second derivative |
+| `diff1d(data, dt)` | Calculate derivative of one-dimensional array |
+
+### Plot Module (plot.py)
+
+| Function | Description |
+|----------|-------------|
+| `plot_channel(pydas_obj, ch_name, sseg, ...)` | Plot channel time series data |
+| `plot_histogram(pydas_obj, ch_name, sseg, bins, ...)` | Generate histogram with statistics |
+| `plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg, ...)` | Create XY scatter plot |
+| `spectral_analysis(pydas_obj, channel_name, method, L, ...)` | Perform spectral analysis on channel |
+
+### Output Module (output.py)
+
+| Function | Description |
+|----------|-------------|
+| `write_data(pydas_obj, filename, sseg, ch)` | Write data to file |
+| `export_to_dat(pydas_obj, Time, sseg)` | Export data to DAT format |
+| `export_to_mat(pydas_obj, sseg)` | Export data to MAT format |
+
+### Utils Module (utils.py)
+
+| Function | Description |
+|----------|-------------|
+| `data_change_fs(data, old_fs, new_fs)` | Change data sampling frequency |
+
+### Logger Module (logger.py)
+
+| Function | Description |
+|----------|-------------|
+| `setup_logger(level)` | Configure the logger for the PyDAS system |
+| `get_logger(name)` | Get a named logger instance |
 
 ## Citation
 
@@ -403,13 +416,13 @@ pip install -e .
 from pydas import PyDAS
 
 # 加载数据文件
-data = PyDAS(filename="your_data_file.csv")
+data = PyDAS(filename="your_data_file.out", lam=36)
 
 # 绘制通道数据
 data.plot_channel("channel1", use_plotly=True)
 
 # 应用滤波器
-data.apply_lowpass_filter("channel1", cutoff=2.0)
+data.apply_lowpass_filter("channel1", cutoffull=2.0)
 
 # 执行谱分析
 spec, fig = data.spectral_analysis(
@@ -421,3 +434,55 @@ spec, fig = data.spectral_analysis(
 ```
 
 有关更详细的说明和示例，请参阅上面的英文文档部分。 
+
+### Large-Scale Data Processing
+
+PyDAS provides optimized methods for handling large datasets (>100,000 points):
+
+```python
+# 导入必要模块
+import dask.dataframe as dd
+import numpy as np
+from pydas import PyDAS
+
+# 加载大型数据集
+data = PyDAS(filename="large_dataset.csv", use_dask=True)
+
+# 使用dask进行并行计算
+df = dd.from_pandas(data.data[0], npartitions=8)
+
+# 通道计算优化
+result = df['channel1'].map_partitions(lambda x: x.rolling(window=100).mean()).compute()
+data.add_channel('channel1_smoothed', result, unit='m')
+
+# 高性能可视化
+data.plot_channel(
+    'channel1_smoothed',
+    use_plotly=True,
+    use_webgl=True,
+    data_decimation='lttb',
+    chunk_size=20000
+)
+
+# 使用datashader和holoviews进行超大数据集可视化（依赖performance扩展）
+try:
+    import datashader as ds
+    import holoviews as hv
+    from holoviews.operation.datashader import datashade
+    
+    hv.extension('bokeh')
+    
+    # 创建holoviews曲线
+    curve = hv.Curve((data.data[0].index, data.data[0]['channel1']))
+    
+    # 使用datashader进行可视化
+    shaded = datashade(curve, width=800, height=400)
+    
+    # 显示图表
+    hv.save(shaded, 'large_dataset_visualization.html')
+    
+except ImportError:
+    print("Performance visualization requires datashader and holoviews.")
+    print("Install with: pip install -e '.[performance]'")
+
+### Full-Scale Analysis

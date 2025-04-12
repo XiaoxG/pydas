@@ -3,6 +3,16 @@
 PyDAS - Python Data Analysis System
 A comprehensive data analysis system for processing and analyzing time series data.
 
+Module Organization:
+------------------
+PyDAS now adopts a modular structure, separating different functionalities into specialized modules:
+- pydas.py: Core class and method definitions
+- process.py: Data processing functions (filtering, differentiation, data cleaning, etc.)
+- plot.py: Visualization functions (plotting, histograms, scatter plots, etc.)
+- output.py: Data output functions (file exports, etc.)
+- utils.py: General utility functions
+- logger.py: Logging functionality
+
 Function Categories:
 ------------------
 1. Channel Operations
@@ -13,31 +23,33 @@ Function Categories:
       - rename_channel: Rename channel
       - change_channel_order: Change channel order
    
-   b) Channel Data Processing:
+   b) Channel Data Processing (imported from process module):
       - remove_mean: Remove mean from channel data
       - add_value: Add constant value to channel data
       - multiply_value: Multiply channel data by constant
-      - cut_series: Cut time series to specified range
       - move_data: Move channel data
       - data_wash: Clean data, detect and interpolate outliers
 
 2. Channel Calculations
-   a) Differential Operations:
+   a) Differential Operations (imported from process module):
       - add_diff1: Calculate and add first derivative
       - add_diff2: Calculate and add second derivative
    
-   b) Filtering:
+   b) Filtering (imported from process module):
       - apply_lowpass_filter: Apply lowpass filter
       - apply_highpass_filter: Apply highpass filter
    
    c) Data Alignment:
       - move_ccor: Move channel data using cross-correlation
       - find_move_ccor: Find points to move between channels
+      - cut_series: Cut time series to specified range
 
-3. Data Output
+3. Data Output (partially imported from output module)
    a) File Output:
       - to_dat: Export data to DAT file
       - to_mat: Export data to MAT file
+      - to_feather: Export data to Feather file
+      - to_parquet: Export data to Parquet file
       - write: Write data file
    
    b) Information Output:
@@ -45,7 +57,7 @@ Function Categories:
       - print_channel_info: Print channel information
       - print_statistics: Print statistical information
 
-4. Data Visualization
+4. Data Visualization (partially imported from plot module)
    - plot_channel: Plot channel data with interactive features and performance optimization
    - plot_histogram: Generate histograms with statistics and Gaussian fitting capabilities
    - plot_xy: Create XY scatter plots with density visualization, downsampling, and linear regression
@@ -64,7 +76,7 @@ Function Categories:
    - updateST: Update statistical information
    - updateChN: Update channel count
 
-8. Global Utility Functions
+8. Global Utility Functions (partially imported from utils module)
    - diff1d: Calculate derivative of one-dimensional array with adaptive optimization
    - data_change_fs: Change data sampling frequency with optimized implementation
 
@@ -107,28 +119,34 @@ Dependencies:
 - matplotlib: Static visualization and fallback rendering
 
 Author: Xiaoxian Guo
-Date: 2025-04-11
+Date: 2025-04-12
 Version: 1.0.3
 """
-import re
 import sys
 import os
 import struct
 import math
 import numpy as np
 import pandas as pd
-import scipy.io as sio
 from scipy.signal import correlate
-from scipy import interpolate
 from scipy.spatial.transform import Rotation as R
-import logging
-import warnings
 from waveModel.timeseries import TimeSeries
 import datetime
-from logger import logger, setup_logger, LOG_LEVELS  # 导入logger模块
-from utils import diff1d, data_change_fs  # 导入utils模块中的通用函数
-from output import write_data, export_to_dat, export_to_mat  # 导入output模块中的函数
-from plot import validate_channel, plot_channel, plot_histogram, plot_xy  # 导入plot模块中的函数
+from logger import logger, setup_logger, LOG_LEVELS  # 修改回非相对导入
+from utils import diff1d,data_change_fs  # 修改回非相对导入
+from output import write_data, export_to_dat, export_to_mat, export_to_feather, export_to_parquet  # 修改回非相对导入
+from plot import validate_channel, plot_channel, plot_histogram, plot_xy  # 修改回非相对导入
+from process import (
+    apply_lowpass_filter, 
+    apply_highpass_filter, 
+    remove_mean, 
+    add_value, 
+    multiply_value, 
+    move_data, 
+    data_wash,
+    add_diff1,
+    add_diff2
+)
 
 # Import numba for acceleration
 try:
@@ -230,7 +248,7 @@ class PyDAS:
             buf = fIn.read(256)
             if not buf:
                 logger.warning(f"Reading data file {self.__filename__} failed, exiting...")
-                return
+                return None
                 
             # Unpack header data
             tmp = struct.unpack(fmtstr, buf)
@@ -427,6 +445,8 @@ class PyDAS:
             self.segStatis = [self.segStatis[sseg]]
             self.data = [self.data[sseg]]
 
+        return None
+
     def write(self, filename, sseg='all', ch='all'):
         """
         Write data to a new *.out file.
@@ -444,7 +464,7 @@ class PyDAS:
         ------
         This method will automatically append '.out' extension if not provided.
         """
-        write_data(self, filename, sseg, ch)
+        return write_data(self, filename, sseg, ch)
 
     def to_dat(self, Time=True, sseg='all'):
         """
@@ -462,7 +482,7 @@ class PyDAS:
         The output file will be named based on the original filename with
         segment number and scale (model or full) appended.
         """
-        export_to_dat(self, Time, sseg)
+        return export_to_dat(self, Time, sseg)
 
     def to_mat(self, sseg=0):
         """
@@ -483,6 +503,59 @@ class PyDAS:
         The output file will be named based on the original filename.
         """
         return export_to_mat(self, sseg)
+
+    def to_feather(self, sseg='all', compression='zstd'):
+        """
+        Export data to Feather file format.
+        
+        Parameters:
+        -----------
+        sseg : int, list, or 'all', optional
+            Segment(s) to export, default is 'all'
+        compression : str or None, optional
+            Compression type to use. Options include: 'zstd', 'lz4', 'uncompressed'
+            Default is 'zstd' which offers good compression and very fast read/write performance.
+            
+        Returns:
+        --------
+        bool
+            True if export was successful, False otherwise
+            
+        Notes:
+        ------
+        The output file(s) will be named based on the original filename with segment number appended.
+        Feather format provides extremely fast read and write performance with pandas DataFrames.
+        It is particularly well-suited for temporary storage and data exchange between Python and R.
+        """
+        return export_to_feather(self, sseg, compression)
+
+    def to_parquet(self, sseg='all', compression='zstd', compression_level=9):
+        """
+        Export data to Apache Parquet file format.
+        
+        Parameters:
+        -----------
+        sseg : int, list, or 'all', optional
+            Segment(s) to export, default is 'all'
+        compression : str, optional
+            Compression type to use. Options include: 'snappy', 'gzip', 'brotli', 'zstd', 'lz4', 'none'
+            Default is 'zstd' which offers a good balance between compression ratio and speed.
+        compression_level : int, optional
+            Compression level for 'gzip', 'brotli', and 'zstd' compressors.
+            Higher values mean better compression, but slower processing.
+            Default is 9 (range typically 1-22 for zstd).
+            
+        Returns:
+        --------
+        bool
+            True if export was successful, False otherwise
+            
+        Notes:
+        ------
+        The output file(s) will be named based on the original filename with segment number appended.
+        Parquet format is optimized for columnar data and offers excellent compression and read performance.
+        """
+        return export_to_parquet(self, sseg, compression, compression_level)
 
     def add_channel(self, name, unit, series, fs, coef=1, point_of_move=0, sseg=0):
         """
@@ -751,7 +824,7 @@ class PyDAS:
         # 检查通道名是否存在
         if chName not in self.chInfo['Name'].values:
             logger.warning(f"Channel '{chName}' does not exist.")
-            return False
+            return None
             
         # 找到对应的索引
         idx = self.chInfo.index[self.chInfo['Name'] == chName].tolist()[0]
@@ -765,6 +838,7 @@ class PyDAS:
             logger.info('\n' + self.chInfo.to_string(justify='center'))
             logger.info('-' * 50)
 
+        return None
 
     def to_fullscale(self, rho=1.025, g=9.807, pInfo=False):
         """
@@ -790,7 +864,7 @@ class PyDAS:
         """
         if self.__scale__ == 'prototype':
             logger.warning('The data is already upscaled.')
-            return
+            return None
         else:
             logger.info('Please make sure the channel units are all checked!')
             if pInfo:
@@ -940,6 +1014,8 @@ class PyDAS:
             # Update statistical information
             self.updateST(sseg=0)
 
+        return None
+
     def read_waveCal(self, wavefname, sseg=0, YBname='YBS', YBcalname='YBS', alignFlag=True):
         """
         Read wave calibration data.
@@ -976,6 +1052,8 @@ class PyDAS:
         if alignFlag:
             for ich in wavecase_cal.chInfo['Name'].values:
                 self.move_ccor('Cal.'+ich, 'Cal.'+YBcalname, YBname, sseg=sseg)
+
+        return None
 
     def move_ccor(self,
                   to_move_chName,
@@ -1184,14 +1262,8 @@ class PyDAS:
             raise ValueError("Number of channels does not match!")
         #self.chInfo.index = range(1,self.__chN__+1)
 
-    def apply_lowpass_filter(self,
-                      chName,
-                      cutoffull=2,
-                      replace=True,
-                      returnValue=False,
-                      sseg=0,
-                      order=6,
-                      plot=False):
+    def apply_lowpass_filter(self, chName, cutoffull=2, replace=True, returnValue=False, 
+                          sseg=0, order=6, plot=False):
         """
         Apply a lowpass filter to a channel.
         
@@ -1216,149 +1288,11 @@ class PyDAS:
         --------
         numpy.ndarray, optional
             Filtered data if returnValue is True
-            
-        Notes:
-        ------
-        - Uses Butterworth filter design
-        - Maintains phase response
-        - Handles edge effects
         """
-        from scipy.signal import butter, filtfilt
-        import copy
-        import pandas as pd
-        
-        def _butter_lowpass(cutoff, fs, order=5):
-            nyq = 0.5 * fs
-            normal_cutoff = cutoff / nyq
-            if normal_cutoff >= 1.0:
-                logger.warning(f"Cutoff frequency ({cutoff} Hz) is too high for sampling frequency ({fs} Hz). "
-                              f"Setting cutoff to 0.99*nyquist.")
-                normal_cutoff = 0.99
-            b, a = butter(order, normal_cutoff, btype='low', analog=False)
-            return b, a
+        return apply_lowpass_filter(self, chName, cutoffull, replace, returnValue, sseg, order, plot)
 
-        def _butter_lowpass_filter(data, cutoff, fs, order=5):
-            try:
-                # 计算滤波器所需的最小数据长度（一般为2*order + 1）
-                min_data_length = 2 * order + 1
-                
-                # 检查数据长度是否足够
-                if len(data) < min_data_length:
-                    logger.warning(f"Data length ({len(data)}) is less than minimum required ({min_data_length}). Filter may not be effective.")
-                
-                # 计算Nyquist频率
-                nyq = 0.5 * fs
-                
-                # 归一化截止频率
-                normal_cutoff = cutoff / nyq
-                
-                # 设计滤波器
-                b, a = _butter_lowpass(cutoff, fs, order)
-                
-                # 应用滤波器
-                y = filtfilt(b, a, data)
-                return y
-            except Exception as e:
-                logger.error(f"Filter error: {str(e)}. Returning original data.")
-                return data
-
-        # 检查通道是否存在
-        if isinstance(chName, str) and chName not in self.chInfo['Name'].values:
-            logger.error(f"Channel '{chName}' not found.")
-            return None
-        
-        # 模型尺度下调整截止频率
-        if self.__scale__ == 'model':
-            cutoff = cutoffull / 2 / np.pi * np.sqrt(self.__lam__)
-        else:
-            cutoff = cutoffull / 2 / np.pi
-
-        # 处理通道列表
-        if isinstance(chName, list):
-            results = []
-            for ch in chName:
-                if ch in self.chInfo['Name'].values:
-                    result = self.apply_lowpass_filter(ch, cutoffull, replace, returnValue, sseg, order, plot)
-                    if returnValue:
-                        results.append(result)
-                else:
-                    logger.warning(f"Channel '{ch}' not found, skipping.")
-            if returnValue:
-                return results
-            return None
-                    
-        # 获取数据
-        try:
-            data = self.data[sseg][chName].values
-        except Exception as e:
-            logger.error(f"Error accessing data for channel {chName}: {str(e)}")
-            return None
-            
-        # 检查数据是否存在且长度足够
-        if data is None or len(data) <= 0:
-            logger.error(f"No data found for channel {chName} in segment {sseg}")
-            return None
-        
-        # 保存原始数据，用于后续对比或绘图
-        original_data = copy.deepcopy(data)
-        
-        # 应用滤波器
-        try:
-            filtered_data = _butter_lowpass_filter(data, cutoff, self.__fs__, order)
-            
-            # 如果需要绘图对比
-            if plot:
-                try:
-                    # 为了绘图对比，我们需要创建一个临时通道
-                    temp_channel_name = f"{chName}_filtered"
-                    
-                    # 创建一个临时PyDAS对象的副本，用于比较
-                    temp_pydas = copy.deepcopy(self)
-                    
-                    # 添加滤波后的临时通道
-                    unit = temp_pydas.chInfo.loc[temp_pydas.chInfo['Name'] == chName, 'Unit'].values[0]
-                    temp_pydas.add_channel(
-                        name=temp_channel_name,
-                        unit=unit,
-                        series=filtered_data,
-                        fs=self.__fs__,
-                        sseg=sseg
-                    )
-                    
-                    # Use Plotly for interactive comparison
-                    plot_channel(
-                        pydas_obj=temp_pydas,
-                        ch_name=[chName, temp_channel_name],
-                        sseg=sseg,
-                        title=f"Lowpass Filter Comparison - {chName} (cutoff={cutoffull} Hz, order={order})",
-                        alpha=[0.5, 0.8],  # 原始数据透明度0.5，滤波后数据保持默认0.8
-                    )
-                except Exception as e:
-                    logger.error(f"Error creating comparison plot: {str(e)}")
-            
-            # 如果需要替换数据
-            if replace:
-                self.data[sseg][chName] = filtered_data
-                logger.info(f'Lowpass for {chName} filter = {cutoffull:3.2f} Hz, Lambda = {self.__lam__:02d}')
-                self.updateST(chName=chName)
-        except Exception as e:
-            logger.error(f"Failed to apply filter to {chName}: {str(e)}")
-            return None
-                
-        # 返回结果（如果需要）
-        if returnValue:
-            return filtered_data
-        
-        return None
-
-    def apply_highpass_filter(self,
-                       chName,
-                       cutoffull=2,
-                       replace=True,
-                       returnValue=False,
-                       sseg=0,
-                       order=6,
-                       plot=False):
+    def apply_highpass_filter(self, chName, cutoffull=2, replace=True, returnValue=False, 
+                           sseg=0, order=6, plot=False):
         """
         Apply a highpass filter to a channel.
         
@@ -1383,143 +1317,10 @@ class PyDAS:
         --------
         numpy.ndarray, optional
             Filtered data if returnValue is True
-            
-        Notes:
-        ------
-        - Uses Butterworth filter design
-        - Maintains phase response
-        - Handles edge effects
         """
-        from scipy.signal import butter, filtfilt
-        import copy
-        
-        def _butter_highpass(cutoff, fs, order=5):
-            nyq = 0.5 * fs
-            normal_cutoff = cutoff / nyq
-            if normal_cutoff >= 1.0:
-                logger.warning(f"Cutoff frequency ({cutoff} Hz) is too high for sampling frequency ({fs} Hz). "
-                              f"Setting cutoff to 0.99*nyquist.")
-                normal_cutoff = 0.99
-            b, a = butter(order, normal_cutoff, btype='high', analog=False)
-            return b, a
+        return apply_highpass_filter(self, chName, cutoffull, replace, returnValue, sseg, order, plot)
 
-        def _butter_highpass_filter(data, cutoff, fs, order=5):
-            try:
-                # 计算滤波器所需的最小数据长度（一般为2*order + 1）
-                min_data_length = 2 * order + 1
-                
-                # 检查数据长度是否足够
-                if len(data) < min_data_length:
-                    logger.warning(f"Data length ({len(data)}) is less than minimum required ({min_data_length}). Filter may not be effective.")
-                
-                # 计算Nyquist频率
-                nyq = 0.5 * fs
-                
-                # 归一化截止频率
-                normal_cutoff = cutoff / nyq
-                
-                # 设计滤波器
-                b, a = _butter_highpass(cutoff, fs, order)
-                
-                # 应用滤波器
-                y = filtfilt(b, a, data)
-                return y
-            except Exception as e:
-                logger.error(f"Filter error: {str(e)}. Returning original data.")
-                return data
-
-        # 检查通道是否存在
-        if isinstance(chName, str) and chName not in self.chInfo['Name'].values:
-            logger.error(f"Channel '{chName}' not found.")
-            return None
-        
-        # 模型尺度下调整截止频率
-        if self.__scale__ == 'model':
-            cutoff = cutoffull / 2 / np.pi * np.sqrt(self.__lam__)
-        else:
-            cutoff = cutoffull / 2 / np.pi
-            
-        # 处理通道列表
-        if isinstance(chName, list):
-            results = []
-            for ch in chName:
-                if ch in self.chInfo['Name'].values:
-                    result = self.apply_highpass_filter(ch, cutoffull, replace, returnValue, sseg, order, plot)
-                    if returnValue:
-                        results.append(result)
-                else:
-                    logger.warning(f"Channel '{ch}' not found, skipping.")
-            if returnValue:
-                return results
-            return None
-        
-        # 获取数据
-        try:
-            data = self.data[sseg][chName].values
-        except Exception as e:
-            logger.error(f"Error accessing data for channel {chName}: {str(e)}")
-            return None
-            
-        # 检查数据是否存在且长度足够
-        if data is None or len(data) <= 0:
-            logger.error(f"No data found for channel {chName} in segment {sseg}")
-            return None
-        
-        # 保存原始数据，用于后续对比或绘图
-        original_data = copy.deepcopy(data)
-        
-        # 应用滤波器
-        try:
-            filtered_data = _butter_highpass_filter(data, cutoff, self.__fs__, order)
-            
-            # 如果需要绘图对比
-            if plot:
-                try:
-                    # 为了绘图对比，我们需要创建一个临时通道
-                    temp_channel_name = f"{chName}_filtered"
-                    
-                    # 创建一个临时PyDAS对象的副本，用于比较
-                    temp_pydas = copy.deepcopy(self)
-                    
-                    # 添加滤波后的临时通道
-                    unit = temp_pydas.chInfo.loc[temp_pydas.chInfo['Name'] == chName, 'Unit'].values[0]
-                    temp_pydas.add_channel(
-                        name=temp_channel_name,
-                        unit=unit,
-                        series=filtered_data,
-                        fs=self.__fs__,
-                        sseg=sseg
-                    )
-                    
-                    # Use Plotly for interactive comparison
-                    plot_channel(
-                        pydas_obj=temp_pydas,
-                        ch_name=[chName, temp_channel_name],
-                        sseg=sseg,
-                        title=f"Highpass Filter Comparison - {chName} (cutoff={cutoffull} Hz, order={order})",
-                        alpha=[0.5, 0.8],  # 原始数据透明度0.5，滤波后数据保持默认0.8
-                    )
-                except Exception as e:
-                    logger.error(f"Error creating comparison plot: {str(e)}")
-            
-            # 如果需要替换数据
-            if replace:
-                self.data[sseg][chName] = filtered_data
-                logger.info(f'Highpass for {chName} filter = {cutoffull:3.2f} Hz, Lambda = {self.__lam__:02d}')
-                self.updateST(chName=chName)
-        except Exception as e:
-            logger.error(f"Failed to apply filter to {chName}: {str(e)}")
-            return None
-                
-        # 返回结果（如果需要）
-        if returnValue:
-            return filtered_data
-            
-        return None
-
-    def remove_mean(self,
-               chName,
-               sseg=0):
+    def remove_mean(self, chName, sseg=0):
         """
         Remove the mean value from one or more channels.
         
@@ -1529,30 +1330,10 @@ class PyDAS:
             Name of the channel(s) to process
         sseg : int, optional
             Segment index, default is 0
-            
-        Raises:
-        -------
-        ValueError
-            If chName is neither a string nor a list
         """
-        if isinstance(chName, list):
-            for ichName in chName:
-                data = self.data[sseg][ichName].values
-                self.data[sseg][ichName] = data - data.mean()
-                self.updateST(chName=ichName)
-            logger.info('remove mean for Channels: ' + ', '.join(chName))
-        elif isinstance(chName, str):
-            data = self.data[sseg][chName].values
-            self.data[sseg][chName] = data - data.mean()
-            self.updateST(chName=chName)
-            logger.info('remove mean for ' + chName)
-        else:
-            logger.warning('Unknown type for ChName!')
+        return remove_mean(self, chName, sseg)
 
-    def add_value(self,
-               chName,
-               value2add,
-               sseg=0):
+    def add_value(self, chName, value2add, sseg=0):
         """
         Add a constant value to one or more channels.
         
@@ -1564,28 +1345,10 @@ class PyDAS:
             Value to add to the channel(s)
         sseg : int, optional
             Segment index, default is 0
-            
-        Raises:
-        -------
-        ValueError
-            If chName is neither a string nor a list
         """
-        if isinstance(chName, list):
-            for ichName in chName:
-                data = self.data[sseg][ichName].values
-                self.data[sseg][ichName] = data + value2add
-                self.updateST(chName=ichName)
-        elif isinstance(chName, str):
-            data = self.data[sseg][chName].values
-            self.data[sseg][chName] = data + value2add
-            self.updateST(chName=chName)
-        else:
-            logger.warning('Unknown type for ChName!')  
+        return add_value(self, chName, value2add, sseg)
 
-    def multiply_value(self,
-               chName,
-               value2mul,
-               sseg=0):
+    def multiply_value(self, chName, value2mul, sseg=0):
         """
         Multiply one or more channels by a constant value.
         
@@ -1597,72 +1360,8 @@ class PyDAS:
             Value to multiply the channel(s) by
         sseg : int, optional
             Segment index, default is 0
-            
-        Raises:
-        -------
-        ValueError
-            If chName is neither a string nor a list
         """
-        if isinstance(chName, list):
-            for ichName in chName:
-                data = self.data[sseg][ichName].values
-                self.data[sseg][ichName] = data * value2mul
-                self.updateST(chName=ichName)
-        elif isinstance(chName, str):
-            data = self.data[sseg][chName].values
-            self.data[sseg][chName] = data * value2mul
-            self.updateST(chName=chName)
-        else:
-            logger.warning('Unknown type for ChName!')
-
-    def cut_series(self,
-                   start,
-                   stop,
-                   sseg=0):
-        """
-        Cut a time series to a specified range.
-        
-        Parameters:
-        -----------
-        start : str or float
-            Start time of the cut (time string or seconds)
-        stop : str or float
-            End time of the cut (time string or seconds)
-        sseg : int, optional
-            Segment index, default is 0
-            
-        Raises:
-        -------
-        ValueError
-            If start or stop times are invalid
-        """
-        def moveTimestr(Timestr, seconds_float):
-            seconds = int(seconds_float)
-            milliseconds = int((seconds_float-seconds)*1000)
-            startTime = datetime.datetime.strptime(Timestr,"%H:%M:%S.%f")
-            startTime_new = (startTime + datetime.timedelta(seconds=seconds, milliseconds=milliseconds)).strftime("%H:%M:%S.%f")
-            return startTime_new[:-5]
-
-        startIndx = int(start * self.__fs__)
-        stopIndx = int(stop * self.__fs__)
-        lngth = self.data[sseg].index[-1]
-        self.data[sseg] = self.data[sseg].drop(range(startIndx + 1))
-        self.data[sseg] = self.data[sseg].drop(range(stopIndx, lngth + 1))
-        self.data[sseg] = self.data[sseg].reset_index(drop=True)
-
-        sampNum = self.data[sseg].shape[0]
-
-        self.segInfo.loc['Seg{0:2d}'.format(
-            sseg),'Start'] = moveTimestr(self.segInfo['Start'].values[0], start)
-        self.segInfo.loc['Seg{0:2d}'.format(
-            sseg),'Stop'] = moveTimestr(self.segInfo['Start'].values[0], stop)
-        self.segInfo.loc['Seg{0:2d}'.format(
-            sseg),'Duration'] = '{0:8.1f}s'.format((sampNum - 1) / self.__fs__)
-        self.segInfo.loc['Seg{0:2d}'.format(
-            sseg),'N sample'] = sampNum
-        self.updateST(sseg=sseg)
-        logger.info('Cut time series from {0:5.2f}s to {1:5.2f}s'.format(
-                start, stop))
+        return multiply_value(self, chName, value2mul, sseg)
 
     def move_data(self, chName, point_of_move, sseg=0):
         """
@@ -1676,30 +1375,62 @@ class PyDAS:
             Number of points to move the data (positive for forward, negative for backward)
         sseg : int, optional
             Segment index, default is 0
-            
-        Raises:
-        -------
-        KeyError
-            If the channel does not exist
         """
-        if chName in self.chInfo['Name'].values:
-            data = self.data[sseg][chName].values
-            n_sample = self.segInfo.iloc[sseg]['N sample']
-            
-            if point_of_move > 0:
-                # Move forward (right shift)
-                data_new = np.zeros(n_sample)
-                data_new[point_of_move:] = data[:n_sample - point_of_move]
-            else:
-                # Move backward (left shift)
-                data_new = np.zeros(n_sample)
-                data_new[:n_sample + point_of_move] = data[-point_of_move:]
-                
-            self.data[sseg][chName] = data_new
-            self.updateST(chName=chName)
-            logger.info(f'Moved {chName} by {point_of_move} points')
-        else:
-            logger.error(f'ERROR! {chName:8s} not found.')
+        return move_data(self, chName, point_of_move, sseg)
+
+    def data_wash(self, ChName, method='linear', order=5, threshold=3, sseg=0):
+        """
+        Clean data by detecting and interpolating outliers.
+        
+        Parameters:
+        -----------
+        ChName : str
+            Name of the channel to clean
+        method : str, optional
+            Interpolation method ('linear' or 'polynomial'), default is 'linear'
+        order : int, optional
+            Order of polynomial interpolation, default is 5
+        threshold : float, optional
+            Standard deviation threshold for outlier detection, default is 3
+        sseg : int, optional
+            Segment index to process, default is 0
+        """
+        return data_wash(self, ChName, method, order, threshold, sseg)
+
+    def add_diff1(self, name, sseg=0, filter=False, filter_cutoff=2):
+        """
+        Calculate and add first derivative of a channel.
+        
+        Parameters:
+        -----------
+        name : str
+            Name of the channel to differentiate
+        sseg : int, optional
+            Segment index to process, default is 0
+        filter : bool, optional
+            Whether to apply lowpass filter, default is False
+        filter_cutoff : float, optional
+            Cutoff frequency for filtering in Hz, default is 2
+        """
+        return add_diff1(self, name, sseg, filter, filter_cutoff)
+
+    def add_diff2(self, name, sseg=0, filter=False, filter_cutoff=2):
+        """
+        Calculate and add second derivative of a channel.
+        
+        Parameters:
+        -----------
+        name : str
+            Name of the channel to differentiate
+        sseg : int, optional
+            Segment index to process, default is 0
+        filter : bool, optional
+            Whether to apply lowpass filter, default is False
+        filter_cutoff : float, optional
+            Cutoff frequency for filtering in Hz, default is 2
+        """
+        return add_diff2(self, name, sseg, filter, filter_cutoff)
+
 
     def read_motion(self, motionfname, alignAccName=None, alignMethod='acc', zerofilename='', lowpassfilter=-1, rotation=True, NameList=['Platform']):
         """
@@ -1896,6 +1627,8 @@ class PyDAS:
             except Exception as e:
                 logger.error(f"Error applying lowpass filter: {str(e)}")
                 logger.warning("Continuing without filtering")
+
+        return None
 
     def updateST(self, chName='all', sseg=0):
         """
@@ -2104,6 +1837,8 @@ class PyDAS:
             else:
                 logger.error(f'ERROR! {chName:8s} not found.')
 
+        return None
+
     def updateChN(self, sseg=0):
         """
         Update channel count information.
@@ -2123,6 +1858,8 @@ class PyDAS:
             self.__chN__ = self.chInfo.shape[0]
         else:
             raise ValueError("Number of channels does not match!")
+
+        return None
 
     def rename_channel(self,
                      chOld,
@@ -2176,339 +1913,61 @@ class PyDAS:
             logger.error(f"Channel renaming failed: {str(e)}")
             return False
     
-    
-    def data_wash(self,
-                 ChName,
-                 method='linear',
-                 order=5, 
-                 threshold=3,
+    def cut_series(self,
+                   start,
+                   stop,
                  sseg=0):
         """
-        Clean data by detecting and interpolating outliers.
+        Cut a time series to a specified range.
         
         Parameters:
         -----------
-        ChName : str
-            Name of the channel to clean
-        method : str, optional
-            Interpolation method ('linear' or 'polynomial'), default is 'linear'
-        order : int, optional
-            Order of polynomial interpolation, default is 5
-        threshold : float, optional
-            Standard deviation threshold for outlier detection, default is 3
+        start : str or float
+            Start time of the cut (time string or seconds)
+        stop : str or float
+            End time of the cut (time string or seconds)
         sseg : int, optional
-            Segment index to process, default is 0
+            Segment index, default is 0
             
-        Notes:
-        ------
-        - Uses statistical methods to detect outliers
-        - Supports different interpolation methods
-        - Optimized for large datasets
-        - Maintains data continuity
+        Raises:
+        -------
+        ValueError
+            If start or stop times are invalid
         """
-        try:
-            # Check if the channel exists
-            if ChName not in self.data[sseg].columns:
-                logger.error(f"Channel '{ChName}' not found in segment {sseg}")
-                raise KeyError(f"Channel '{ChName}' not found")
-                
-            # 获取数据Series
-            data_series = self.data[sseg][ChName]
-            data_length = len(data_series)
-            
-            # 为了更高效地处理大数据集，根据数据大小选择不同的处理方法
-            if data_length > 1000000:  # 超大数据集
-                return self._data_wash_large(ChName, method, order, threshold, sseg)
-            
-            logger.info(f"Cleaning channel '{ChName}' with {method} interpolation (threshold={threshold}σ)")
-            
-            # 使用pandas的优化方法计算均值和标准差
-            arr_mean = data_series.mean()
-            arr_std = data_series.std()
-            
-            # 检测异常值（使用向量化操作）
-            outlier_mask = np.abs(data_series - arr_mean) > threshold * arr_std
-            outlier_count = outlier_mask.sum()
-            
-            if outlier_count > 0:
-                logger.info(f"Found {outlier_count} outliers in channel '{ChName}'")
-                
-                # 创建带有NaN值的Series用于插值
-                cleaned_series = data_series.copy()
-                cleaned_series[outlier_mask] = np.nan
-                
-                # 使用pandas的优化插值方法
-                try:
-                    if method in ['spline', 'polynomial']:
-                        # 这些方法需要order参数
-                        filled_series = cleaned_series.interpolate(method=method, order=order, limit_direction='both')
-                        logger.info(f"Applied {method} interpolation with order {order}")
-                    else:
-                        # 其他方法不需要order参数
-                        filled_series = cleaned_series.interpolate(method=method, limit_direction='both')
-                        logger.info(f"Applied {method} interpolation")
-                    
-                    # 检查是否还有NaN值
-                    remaining_nans = filled_series.isna().sum()
-                    if remaining_nans > 0:
-                        logger.warning(f"{remaining_nans} NaN values could not be interpolated")
-                        
-                        # 尝试用前向和后向填充处理剩余的NaN值
-                        filled_series = filled_series.fillna(method='ffill').fillna(method='bfill')
-                        
-                        # 再次检查
-                        remaining_nans = filled_series.isna().sum()
-                        if remaining_nans > 0:
-                            logger.error(f"{remaining_nans} NaN values still remain after additional filling")
-                        else:
-                            logger.info("Remaining NaN values filled with forward/backward fill")
-                    
-                    # 更新数据
-                    self.data[sseg][ChName] = filled_series.values
-                    
-                except Exception as e:
-                    logger.error(f"Interpolation failed: {str(e)}")
-                    raise ValueError(f"Interpolation method '{method}' failed: {str(e)}")
-            else:
-                logger.info(f"No outliers found in channel '{ChName}'")
-            
-            # 手动更新统计信息，避免列不匹配问题
-            series = self.data[sseg][ChName].values
-            
-            # 获取单位
-            unit_idx = np.where(self.chInfo['Name'].values == ChName)[0][0]
-            unit = self.chInfo['Unit'].values[unit_idx]
-            
-            # 手动计算统计量并更新
-            self.segStatis[sseg].loc[ChName] = [
-                np.mean(series), np.std(series), np.amax(series), np.amin(series), unit]
-                
-            return True
-            
-        except Exception as e:
-            logger.error(f"Data washing failed: {str(e)}")
-            return False
-    
-    def _data_wash_large(self, ChName, method='linear', order=5, threshold=3, sseg=0):
-        """
-        优化的处理大型数据集的数据清洗方法。
-        通过分块处理来减少内存占用。
-        
-        Parameters:
-        -----------
-        同data_wash方法
-        """
-        try:
-            # 获取数据
-            data = self.data[sseg][ChName].values
-            data_length = len(data)
-            
-            logger.info(f"Using optimized method for large dataset ({data_length} points)")
-            
-            # 计算全局均值和标准差
-            global_mean = np.mean(data)
-            global_std = np.std(data)
-            
-            # 分块大小
-            chunk_size = min(100000, data_length // 10)  # 确保至少分10块
-            
-            # 创建输出数组
-            output_data = np.copy(data)
-            total_outliers = 0
-            
-            # 分块处理
-            for start in range(0, data_length, chunk_size):
-                end = min(start + chunk_size, data_length)
-                chunk = data[start:end]
-                
-                # 在当前块中检测异常值
-                outlier_mask = np.abs(chunk - global_mean) > threshold * global_std
-                outlier_indices = np.where(outlier_mask)[0] + start
-                chunk_outlier_count = len(outlier_indices)
-                total_outliers += chunk_outlier_count
-                
-                if chunk_outlier_count > 0:
-                    # 将异常值设为NaN
-                    output_data[outlier_indices] = np.nan
-            
-            if total_outliers > 0:
-                logger.info(f"Found {total_outliers} outliers in channel '{ChName}'")
-                
-                # 使用pandas的Series进行高效插值
-                series = pd.Series(output_data)
-                
-                try:
-                    if method in ['spline', 'polynomial']:
-                        filled_series = series.interpolate(method=method, order=order, limit_direction='both')
-                    else:
-                        filled_series = series.interpolate(method=method, limit_direction='both')
-                    
-                    # 处理边缘的NaN值
-                    filled_series = filled_series.fillna(method='ffill').fillna(method='bfill')
-                    
-                    # 检查是否还有NaN值
-                    remaining_nans = filled_series.isna().sum()
-                    if remaining_nans > 0:
-                        logger.warning(f"{remaining_nans} NaN values could not be filled")
-                    
-                    # 更新数据
-                    self.data[sseg][ChName] = filled_series.values
-                    
-                except Exception as e:
-                    logger.error(f"Large dataset interpolation failed: {str(e)}")
-                    raise ValueError(f"Interpolation method '{method}' failed for large dataset: {str(e)}")
-            else:
-                logger.info(f"No outliers found in channel '{ChName}'")
-            
-            # 手动更新统计信息，避免列不匹配问题
-            cleaned_data = self.data[sseg][ChName].values
-            
-            # 获取单位
-            unit_idx = np.where(self.chInfo['Name'].values == ChName)[0][0]
-            unit = self.chInfo['Unit'].values[unit_idx]
-            
-            # 手动计算统计量并更新
-            self.segStatis[sseg].loc[ChName] = [
-                np.mean(cleaned_data), np.std(cleaned_data), np.amax(cleaned_data), np.amin(cleaned_data), unit]
-                
-            return True
-            
-        except Exception as e:
-            logger.error(f"Large dataset washing failed: {str(e)}")
-            return False
+        def moveTimestr(Timestr, seconds_float):
+            seconds = int(seconds_float)
+            milliseconds = int((seconds_float-seconds)*1000)
+            startTime = datetime.datetime.strptime(Timestr,"%H:%M:%S.%f")
+            startTime_new = (startTime + datetime.timedelta(seconds=seconds, milliseconds=milliseconds)).strftime("%H:%M:%S.%f")
+            return startTime_new[:-5]
 
-    def add_diff1(self, name, sseg=0, filter=False, filter_cutoff=2):
-        """
-        Calculate and add first derivative of a channel.
-        
-        Parameters:
-        -----------
-        name : str
-            Name of the channel to differentiate
-        sseg : int, optional
-            Segment index to process, default is 0
-        filter : bool, optional
-            Whether to apply lowpass filter, default is False
-        filter_cutoff : float, optional
-            Cutoff frequency for filtering in Hz, default is 2
-            
-        Notes:
-        ------
-        - Uses optimized numerical differentiation
-        - Optional lowpass filtering to reduce noise
-        - Maintains data alignment
-        """
-        try:
-            if name in self.chInfo['Name'].values:
-                # Get channel data and unit
-                data = self.data[sseg][name].values
-                unit_idx = np.where(self.chInfo['Name'].values == name)[0][0]
-                unit = self.chInfo['Unit'].values[unit_idx]
-                
-                # Calculate derivative
-                dt = 1.0 / self.__fs__
-                diff_data = diff1d(data, dt)
-                logger.info(f"Calculated first derivative of {name}")
-                
-                # Apply filter if requested
-                if filter:
-                    diff_data = self.apply_lowpass_filter(diff_data, cutoffull=filter_cutoff, 
-                                                         replace=False, returnValue=True)
-                
-                # Determine new unit
-                if 'm' in unit and not '/' in unit:
-                    new_unit = unit + '/s'
-                elif 'deg' in unit and not '/' in unit:
-                    new_unit = unit + '/s'
-                else:
-                    new_unit = unit + '/s'
-                
-                # Add new channel
-                new_name = name + '_d1'
-                self.add_channel(new_name, new_unit, diff_data, self.__fs__)
-                return True
-            else:
-                logger.error(f"Channel '{name}' does not exist.")
-                return False
-        except Exception as e:
-            logger.error(f"Failed to add derivative channel: '{name}'")
-            logger.error(f"Error in add_diff1: {str(e)}")
-            return False
+        startIndx = int(start * self.__fs__)
+        stopIndx = int(stop * self.__fs__)
+        lngth = self.data[sseg].index[-1]
+        self.data[sseg] = self.data[sseg].drop(range(startIndx + 1))
+        self.data[sseg] = self.data[sseg].drop(range(stopIndx, lngth + 1))
+        self.data[sseg] = self.data[sseg].reset_index(drop=True)
 
-    def add_diff2(self, name, sseg=0, filter=False, filter_cutoff=2):
-        """
-        Calculate and add second derivative of a channel.
-        
-        Parameters:
-        -----------
-        name : str
-            Name of the channel to differentiate
-        sseg : int, optional
-            Segment index to process, default is 0
-        filter : bool, optional
-            Whether to apply lowpass filter, default is False
-        filter_cutoff : float, optional
-            Cutoff frequency for filtering in Hz, default is 2
-            
-        Notes:
-        ------
-        - Uses optimized numerical differentiation
-        - Optional lowpass filtering to reduce noise
-        - Maintains data alignment
-        """
-        try:
-            if name in self.chInfo['Name'].values:
-                # Get channel data and unit
-                data = self.data[sseg][name].values
-                unit_idx = np.where(self.chInfo['Name'].values == name)[0][0]
-                unit = self.chInfo['Unit'].values[unit_idx]
-                
-                # Calculate first derivative
-                dt = 1.0 / self.__fs__
-                diff1_data = diff1d(data, dt)
-                logger.info(f"Calculated first derivative of {name}")
-                
-                # Apply filter if requested
-                if filter:
-                    diff1_data = self.apply_lowpass_filter(diff1_data, cutoffull=filter_cutoff, 
-                                                          replace=False, returnValue=True)
-                
-                # Calculate second derivative
-                diff2_data = diff1d(diff1_data, dt)
-                logger.info(f"Calculated second derivative of {name}")
-                
-                # Apply filter if requested
-                if filter:
-                    diff2_data = self.apply_lowpass_filter(diff2_data, cutoffull=filter_cutoff, 
-                                                          replace=False, returnValue=True)
-                
-                # Determine new unit
-                if 'm' in unit and not '/' in unit:
-                    new_unit = unit + '/s2'
-                elif 'deg' in unit and not '/' in unit:
-                    new_unit = unit + '/s2'
-                else:
-                    new_unit = unit + '/s2'
-                
-                # Add the new channel
-                new_name = name + '_d2'
-                self.add_channel(new_name, new_unit, diff2_data, self.__fs__, sseg=sseg)
-                logger.info(f"Added second derivative channel {new_name}")
-                
-                self.add_channel(new_name, new_unit, diff2_data, self.__fs__)
-                return True
-            else:
-                logger.error(f"Channel '{name}' does not exist.")
-                return False
-        except Exception as e:
-            logger.error(f"Failed to add derivative channel: '{name}'")
-            logger.error(f"Error in add_diff2: {str(e)}")
-            return False
+        sampNum = self.data[sseg].shape[0]
+
+        self.segInfo.loc['Seg{0:2d}'.format(
+            sseg),'Start'] = moveTimestr(self.segInfo['Start'].values[0], start)
+        self.segInfo.loc['Seg{0:2d}'.format(
+            sseg),'Stop'] = moveTimestr(self.segInfo['Start'].values[0], stop)
+        self.segInfo.loc['Seg{0:2d}'.format(
+            sseg),'Duration'] = '{0:8.1f}s'.format((sampNum - 1) / self.__fs__)
+        self.segInfo.loc['Seg{0:2d}'.format(
+            sseg),'N sample'] = sampNum
+        self.updateST(sseg=sseg)
+        logger.info('Cut time series from {0:5.2f}s to {1:5.2f}s'.format(
+                start, stop))
+
+        return None
 
     def plot_channel(self, ch_idx, sseg=0, figsize=(10, 6), title=None, 
                     xlabel='Time (s)', ylabel=None, grid=True, 
-                    color='blue', linewidth=1.0, alpha=0.8,
-                    xlim=None, ylim=None, interactive=True,
+                    color=None, linewidth=1.0, alpha=0.8,
+                    xlim=None, ylim=None, 
                  downsampling=True, max_points=40000, 
                  save_path=None, show=True, use_plotly=True,
                  height=None, width=None, save_html=None,
@@ -2543,8 +2002,6 @@ class PyDAS:
             X-axis limits (min, max), default is None (auto)
         ylim : tuple, optional
             Y-axis limits (min, max), default is None (auto)
-        interactive : bool, optional
-            Whether to enable interactive features, default is True
         downsampling : bool, optional
             Whether to enable downsampling for large datasets, default is True
         max_points : int, optional
@@ -3244,3 +2701,5 @@ class PyDAS:
                         segment_stats.to_excel(writer, sheet_name=f'SEG{idx:02d}')
                 
                 logger.info(f"Statistics exported to: {excel_filename}")
+
+        return None

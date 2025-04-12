@@ -38,3 +38,16 @@
 ### Optimized
 
 - Basic performance optimizations for medium-sized datasets
+
+## [1.0.4] - 2023-05-15
+
+### Changed
+
+- Migrated from setup.py to pyproject.toml for modern Python packaging
+- Updated build system to use setuptools>=64.0.0
+- Improved package metadata and dependency management
+
+### Fixed
+
+- Resolved deprecated editable install warning with pip>=25.1
+- Fixed compatibility issues with newer pip versions
