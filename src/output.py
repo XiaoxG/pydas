@@ -231,7 +231,7 @@ def export_to_dat(pydas_obj, Time=True, sseg='all'):
                         header=False,
                         index=False,
                         justify='left',
-                        float_format='% .5E'
+                        float_format=lambda x: f"% .5E" % x
                     )
                 )
         

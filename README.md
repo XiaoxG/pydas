@@ -48,6 +48,7 @@ The `PyDAS` class is the main entry point for working with time series data:
   - `select_channels(chnames)`: Select and keep specified channels
   - `rename_channel(chOld, chNew, sseg)`: Rename a channel
   - `change_channel_order(newOrder, sseg)`: Change the order of channels
+  - `copy_channel(chName, new_chName, sseg)`: Create a copy of existing channel
 
 - **Data Alignment**
   - `move_ccor(to_move_chName, base_chName, reference_ch, sseg)`: Move channel using cross-correlation
@@ -67,10 +68,15 @@ The `PyDAS` class is the main entry point for working with time series data:
   - `print_info(printTxt, printExcel)`: Print basic information
   - `print_channel_info(printTxt, printExcel)`: Print channel information
   - `print_statistics(printTxt, printExcel)`: Print statistical information
+  - `statistic_analysis(ch_name, sseg, advanced, visualization, ...)`: Perform comprehensive statistical analysis with visualization
 
 - **Data Maintenance**
   - `updateST(chName, sseg)`: Update statistical information
   - `updateChN(sseg)`: Update channel count
+
+- **Channel Calculation**
+  - `channel_calculate(ch1, ch2, operation, new_chName, sseg)`: Perform arithmetic operation between two channels
+  - `channel_apply_function(ch, func, new_chName, unit, sseg)`: Apply custom function to a single channel
 
 ### Process Module (process.py)
 
@@ -284,6 +290,83 @@ data.plot_histogram(
 )
 ```
 
+### Channel Calculation
+
+```python
+# 通道之间的运算
+# 加法运算 - 将两个相同单位的通道相加
+data.channel_calculate("wave1", "wave2", "+", "wave_sum")
+# 或使用名称
+data.channel_calculate("wave1", "wave2", "add", "wave_sum")
+
+# 减法运算 - 计算两个通道的差值
+data.channel_calculate("force1", "force2", "-", "force_diff") 
+
+# 乘法运算 - 例如力和臂长相乘得到力矩
+data.channel_calculate("force", "arm_length", "*", "moment")
+# 或使用名称
+data.channel_calculate("force", "arm_length", "multiply", "moment")
+
+# 除法运算 - 例如计算阻抗(电压除以电流)
+data.channel_calculate("voltage", "current", "/", "resistance")
+# 自动处理除零错误
+
+# 单通道函数运算
+# 使用字符串表达式
+data.channel_apply_function("displacement", "x**2", "displacement_squared")
+data.channel_apply_function("voltage", "np.log10(x)", "voltage_log")
+data.channel_apply_function("signal", "np.abs(x)", "signal_magnitude")
+
+# 使用函数对象
+import numpy as np
+data.channel_apply_function("acceleration", np.square, "accel_squared")
+data.channel_apply_function("velocity", lambda x: x**3, "velocity_cubed")
+
+# 指定单位(默认会自动推断)
+data.channel_apply_function("force", "x**2", "force_squared", unit="N²")
+
+# 应用三角函数
+data.channel_apply_function("angle", "np.sin(x)", "sin_component")
+data.channel_apply_function("signal", "np.arctan(x)", "phase")
+
+# 分段处理
+data.channel_apply_function("wave_height", "x**2", "wave_energy", sseg=[0, 1, 2]) 
+```
+
+### Statistical Analysis
+
+```python
+# 基本统计分析
+stats = data.statistic_analysis("wave_height")
+print(stats)  # 显示统计结果DataFrame
+
+# 分析多个通道
+stats_multi = data.statistic_analysis(["wave_height", "wave_period", "current_speed"])
+
+# 高级统计量 (包括偏度、峰度、分位数、峰值因子等)
+stats_advanced = data.statistic_analysis("acceleration", advanced=True)
+
+# 带可视化的统计分析
+data.statistic_analysis("wave_force", 
+                        advanced=True,
+                        visualization=True,  # 启用可视化
+                        bins=100,            # 直方图箱数
+                        use_plotly=True)     # 使用plotly生成交互式图表
+
+# 保存统计分析结果和图表
+data.statistic_analysis("mooring_tension", 
+                        sseg=2,               # 分析第3个数据段
+                        advanced=True, 
+                        visualization=True,
+                        save_fig=True,        # 保存图形
+                        save_path="./results") # 保存路径
+
+# 使用matplotlib可视化 (替代plotly)
+data.statistic_analysis("current_profile", 
+                        visualization=True,
+                        use_plotly=False)     # 使用matplotlib代替plotly
+```
+
 ### Data Export
 
 ```python
@@ -314,6 +397,9 @@ PyDAS is distributed under the MIT License. See the LICENSE file for more inform
 | | `select_channels(chnames)` | Select and keep specified channels |
 | | `rename_channel(chOld, chNew, sseg)` | Rename an existing channel |
 | | `change_channel_order(newOrder, sseg)` | Change the order of channels |
+| | `copy_channel(chName, new_chName, sseg)` | Create a copy of existing channel |
+| **Channel Calculation** | `channel_calculate(ch1, ch2, operation, new_chName, sseg)` | Perform arithmetic operation between two channels |
+| | `channel_apply_function(ch, func, new_chName, unit, sseg)` | Apply custom function to a single channel |
 | **Data Alignment** | `move_ccor(to_move_chName, base_chName, reference_ch, sseg)` | Move channel using cross-correlation |
 | | `find_move_ccor(base_chName, reference_ch, sseg)` | Find points to move between channels |
 | | `cut_series(start, stop, sseg)` | Cut time series to specified range |
@@ -325,6 +411,7 @@ PyDAS is distributed under the MIT License. See the LICENSE file for more inform
 | **Information Output** | `print_info(printTxt, printExcel)` | Print basic information |
 | | `print_channel_info(printTxt, printExcel)` | Print channel information |
 | | `print_statistics(printTxt, printExcel)` | Print statistical information |
+| | `statistic_analysis(ch_name, sseg, advanced, visualization, ...)` | Perform comprehensive statistical analysis with visualization |
 | **Data Maintenance** | `updateST(chName, sseg)` | Update statistical information |
 | | `updateChN(sseg)` | Update channel count information |
 

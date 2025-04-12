@@ -133,9 +133,10 @@ from scipy.spatial.transform import Rotation as R
 from waveModel.timeseries import TimeSeries
 import datetime
 from logger import logger, setup_logger, LOG_LEVELS  # 修改回非相对导入
-from utils import diff1d,data_change_fs  # 修改回非相对导入
+from utils import diff1d, data_change_fs, get_default_transDict, findtrans  # 添加导入get_default_transDict和findtrans
 from output import write_data, export_to_dat, export_to_mat, export_to_feather, export_to_parquet  # 修改回非相对导入
 from plot import validate_channel, plot_channel, plot_histogram, plot_xy  # 修改回非相对导入
+from analysis import spectral_analysis, statistic_analysis  # 从analysis模块导入分析函数
 from process import (
     apply_lowpass_filter, 
     apply_highpass_filter, 
@@ -873,84 +874,11 @@ class PyDAS:
             self.rho = rho
             self.__scale__ = 'prototype'
             
-            # Predefined unit conversion dictionary
-            transDict = {
-                'kg': ['kN', np.array([g * 0.001, 1.0, 3.0])],
-                'cm': ['m', np.array([0.01, 0.0, 1.0])],
-                'mm': ['m', np.array([0.001, 0.0, 1.0])],
-                'm': ['m', np.array([1, 0.0, 1.0])],
-                's': ['s', np.array([1, 0.0, 0.5])],
-                'deg': ['deg', np.array([1, 0.0, 0.0])],
-                'rad': ['rad', np.array([1, 0.0, 0.0])],
-                'n': ['kn', np.array([0.001, 1.0, 3.0])],  # Added lowercase unit to avoid conversion issues
-                'kn': ['kn', np.array([1, 0.0, 0.0])],
-                '%': ['%', np.array([1, 0.0, 0.0])],
-                '-': ['-', np.array([1, 0.0, 0.0])]
-            }
+            # Get unit conversion dictionary using utility function
+            transDict = get_default_transDict(g)
             
-            # Create cache dictionary to avoid recalculating the same unit conversions
-            trans_cache = {}
-            
-            def findtrans(transDict, unit):
-                # Check if result is already in cache
-                unit = unit.lower().strip()
-                if unit in trans_cache:
-                    return trans_cache[unit]
-                
-                if unit in transDict:
-                    trans = transDict[unit]
-                    trans_cache[unit] = trans
-                    return trans
-                elif '/' in unit:
-                    unitUpper, unitLower = unit.split('/')
-                    transUpper = findtrans(transDict, unitUpper)
-                    transLower = findtrans(transDict, unitLower)
-                    trans = [transUpper[0] + '/' +
-                             transLower[0], np.array([0.0, 0.0, 0.0])]
-                    trans[1][0] = transUpper[1][0] / transLower[1][0]
-                    trans[1][1] = transUpper[1][1] - transLower[1][1]
-                    trans[1][2] = transUpper[1][2] - transLower[1][2]
-                    trans_cache[unit] = trans
-                    return trans
-                elif '.' in unit:
-                    unitWithDot = unit.split('.')
-                    transU = []
-                    transN1 = np.array([])
-                    transN2 = np.array([])
-                    transN3 = np.array([])
-                    for uWithDot in unitWithDot:
-                        transWithDot = findtrans(transDict, uWithDot)
-                        transU.append(transWithDot[0])
-                        transN1 = np.append(transN1, transWithDot[1][0])
-                        transN2 = np.append(transN2, transWithDot[1][1])
-                        transN3 = np.append(transN3, transWithDot[1][2])
-                    trans = ['.'.join(transU), np.array([1.0, 0.0, 0.0])]
-                    for x in np.nditer(transN1):
-                        trans[1][0] *= x
-                    trans[1][1] = transN2.sum()
-                    trans[1][2] = transN3.sum()
-                    trans_cache[unit] = trans
-                    return trans
-                elif unit[-1].isdigit():
-                    n = int(unit[-1])
-                    unit_base = unit[0:-1]
-                    if unit_base in transDict:
-                        trans_temp = transDict[unit_base]
-                        trans = [trans_temp[0] +
-                                 str(n), np.array([1.0, 0.0, 0.0])]
-                        trans[1][0] = trans_temp[1][0]**n
-                        trans[1][1] = trans_temp[1][1] * n
-                        trans[1][2] = trans_temp[1][2] * n
-                        trans_cache[unit] = trans
-                        return trans
-                    else:
-                        logger.warning(
-                            f"Input unit '{unit}' cannot be identified, using default values.")
-                        return [unit, np.array([1.0, 0.0, 0.0])]
-                else:
-                    logger.warning(
-                        f"Input unit '{unit}' cannot be identified, using default values.")
-                    return [unit, np.array([1.0, 0.0, 0.0])]
+            # Clear global trans cache to ensure fresh calculation
+            findtrans('', transDict, clear_cache=True)
             
             # Preprocess: batch get all unit conversions
             unique_units = self.chInfo['Unit'].unique()
@@ -959,7 +887,7 @@ class PyDAS:
             # Parallel precompute all unique unit conversions
             for unit in unique_units:
                 if not pd.isna(unit):  # Handle potential NaN values
-                    unit_to_trans[unit] = findtrans(transDict, unit)
+                    unit_to_trans[unit] = findtrans(unit, transDict)
             
             # Prepare batch update data
             transUnit = []
@@ -2326,11 +2254,11 @@ class PyDAS:
         # Get channel unit
         unit = self.chInfo.loc[ch_idx, 'Unit']
         
-        # Define unit conversion dictionary (same as in to_fullscale)
-        transDict = self._get_default_transDict(g)
+        # Get unit conversion dictionary using utility function
+        transDict = get_default_transDict(g)
         
-        # Get conversion factors
-        trans_temp = self._findtrans(unit, transDict)
+        # Get conversion factors using utility function
+        trans_temp = findtrans(unit, transDict)
         logger.debug(f"Conversion result for unit {unit}: {trans_temp}")
         
         # 确保系数是浮点数
@@ -2399,246 +2327,59 @@ class PyDAS:
             logger.error(f"Error creating TimeSeries object: {str(e)}")
             return None
 
-    def spectral_analysis(self, channel_name, method='cov', L=1024, plot=False, title=None, show=True, save_path=None, use_plotly=True, save_html=None,fullscale=False, lam=None, rho=1.025, g=9.807, freq_range=(0, 2)):
+    def spectral_analysis(self, channel_name, method='cov', L=1024, plot=False, title=None, 
+                         show=True, save_path=None, use_plotly=True, save_html=None,
+                         fullscale=False, lam=None, rho=1.025, g=9.807, freq_range=(0, 2)):
         """
-        Perform spectral analysis on a single channel and return a spectral data object
+        Perform spectral analysis on a single channel and return a spectral data object.
+        This method calls the spectral_analysis function from the analysis module.
+        
+        See analysis.spectral_analysis for full documentation.
+        """
+        return spectral_analysis(self, channel_name, method, L, plot, title, show, save_path, 
+                               use_plotly, save_html, fullscale, lam, rho, g, freq_range)
+    
+    def statistic_analysis(self, ch_name, sseg=0, advanced=False, visualization=False, bins=50, 
+                          save_fig=False, save_path=None, use_plotly=False, fullscale=False, lam=None, 
+                          rho=1.025, g=9.807):
+        """
+        对通道进行时域统计分析。此方法调用analysis模块中的statistic_analysis函数。
         
         Parameters:
         -----------
-        channel_name : str
-            Name of the channel to analyze
-        method : str, optional
-            Spectral analysis method ('cov' or 'psd'), default is 'cov'
-        L : int, optional
-            Window size for spectral analysis, default is 1024
-        plot : bool, optional
-            Whether to generate a plot, default is False
-        title : str, optional
-            Title for the plot, default is None
-        show : bool, optional
-            Whether to display the plot, default is True
+        ch_name : str
+            要分析的通道名称
+        sseg : int, optional
+            要分析的数据段索引，默认为0
+        advanced : bool, optional
+            是否计算高级统计量（偏度、峰度、分位数等），默认为False
+        visualization : bool, optional
+            是否显示统计量可视化，默认为False
+        bins : int, optional
+            直方图的箱数，默认为50
+        save_fig : bool, optional
+            是否保存图形，默认为False
         save_path : str, optional
-            Path to save the plot, default is None
+            图形保存路径，默认为None（当前目录）
         use_plotly : bool, optional
-            Use Plotly for interactive plotting, default is True
-        save_html : str, optional
-            Path to save interactive HTML plot, default is None
+            是否使用plotly进行可视化，默认为False
         fullscale : bool, optional
-            Whether to convert data to full scale before analysis, default is False
+            是否转换为原型尺度，默认为False
         lam : float, optional
-            Scale factor, used only when fullscale=True, default uses object's __lam__ attribute
+            尺度系数，仅在fullscale=True时使用，默认为None（使用对象的__lam__属性）
         rho : float, optional
-            Water density (kg/m³), default is 1.025
+            水密度(kg/m³)，仅在fullscale=True时使用，默认为1.025
         g : float, optional
-            Gravitational acceleration (m/s²), default is 9.807
-        freq_range : tuple, optional
-            Frequency range in full scale (rad/s), default is (0, 2)
+            重力加速度(m/s²)，仅在fullscale=True时使用，默认为9.807
             
-        Returns:
-        --------
-        spec : waveModel.SpecData1D
-            Spectral data object
-            
-        Notes:
-        ------
-        - Spectral analysis is performed using the waveModel toolkit
-        - The spectrum shows spectral density vs. angular frequency (rad/s)
-        - The returned object can be used for further analysis or custom plotting
-        - When fullscale=True, data is converted to full scale using channel2fullscale method before analysis
-        - freq_range specifies the valid frequency range in full scale, which is automatically converted for model scale
+        完整文档请参见analysis.statistic_analysis。
         """
-        # Check if channel exists
-        if channel_name not in self.chInfo['Name'].values:
-            logger.error(f"Channel '{channel_name}' does not exist")
-            return None
+        # 如果fullscale=True但未提供lam参数，使用对象的__lam__属性
+        if fullscale and lam is None:
+            lam = self.__lam__
             
-        # Ensure valid scale factor
-        if lam is None:
-            if hasattr(self, '__lam__'):
-                lam = self.__lam__
-            else:
-                if fullscale:
-                    logger.error("No scale factor lam provided and object has no default __lam__ attribute")
-                    return None
-                else:
-                    # If no full scale conversion needed, set a default value for frequency range calculation
-                    lam = 1
-                    
-        # Calculate corresponding frequency range
-        # In Froude scaling, frequency scale is sqrt(λ)
-        if fullscale:
-            # Full scale uses the directly specified range
-            w_range = freq_range
-        else:
-            # Model scale, convert frequency range
-            # f_model = f_full * sqrt(λ)
-            w_range = (freq_range[0] * np.sqrt(lam), freq_range[1] * np.sqrt(lam))
-            logger.info(f"Model scale frequency range conversion: {freq_range} rad/s -> {w_range} rad/s")
-            
-        # If full scale conversion is requested
-        if fullscale:                    
-            try:
-                # Get full scale TimeSeries using channel2fullscale
-                ts = self.channel2fullscale(channel_name, lam, rho, g)
-                if ts is None:
-                    logger.error(f"Full scale conversion failed for channel: {channel_name}")
-                    return None
-                
-                # 检查TimeSeries对象数据，确认其类型
-                logger.debug(f"TimeSeries data type: {type(ts.data)}, shape: {ts.data.shape if hasattr(ts.data, 'shape') else 'unknown'}")
-                logger.debug(f"TimeSeries args type: {type(ts.args)}, shape: {ts.args.shape if hasattr(ts.args, 'shape') else 'unknown'}")
-                
-                # 检查数据是否为浮点数
-                if hasattr(ts.data, 'dtype') and not np.issubdtype(ts.data.dtype, np.floating):
-                    logger.warning(f"TimeSeries data is not floating point, converting from {ts.data.dtype}")
-                    ts.data = np.array(ts.data, dtype=np.float64)
-                
-                # Calculate spectrum
-                try:
-                    spec = ts.tospecdata(L=L, method=method)
-                except TypeError as te:
-                    logger.error(f"Type error in tospecdata: {str(te)}")
-                    # 尝试修复数据类型问题
-                    logger.debug("Attempting to fix data type issues...")
-                    if hasattr(ts, 'data'):
-                        ts.data = np.array(ts.data, dtype=np.float64)
-                    if hasattr(ts, 'args'):
-                        ts.args = np.array(ts.args, dtype=np.float64)
-                    # 再次尝试
-                    spec = ts.tospecdata(L=L, method=method)
-                except Exception as e:
-                    logger.error(f"Error in tospecdata: {str(e)}")
-                    raise
-            except Exception as e:
-                logger.error(f"Full scale spectral analysis failed: {str(e)}")
-                return None
-        else:
-            # Default using the first data segment
-            sseg = 0
-            
-            # Get channel data
-            data = self.data[sseg][channel_name].values.copy().astype(np.float64)
-            
-            # Create time vector (assuming equal sampling intervals)
-            fs = self.__fs__
-            t = np.arange(0, len(data)) / fs
-            
-            # Create TimeSeries object
-            try:
-                # 修改TimeSeries初始化方式，遵循其定义
-                ts = TimeSeries(data, t)
-                
-                # Calculate spectrum
-                spec = ts.tospecdata(L=L, method=method)
-            except Exception as e:
-                logger.error(f"Spectral analysis failed: {str(e)}")
-                return None
-        
-        # Apply frequency range limitation
-        try:
-            # Get frequencies and corresponding spectral density
-            freqs = spec.args
-            density = spec.data
-            
-            # Find indices within specified range
-            idx = np.logical_and(freqs >= w_range[0], freqs <= w_range[1])
-            
-            # If no data points found, warn but continue
-            if not np.any(idx):
-                logger.warning(f"No data points within specified frequency range {w_range} rad/s")
-            else:
-                # Update spectral object data
-                spec.args = freqs[idx]
-                spec.data = density[idx]
-                logger.info(f"Spectral data limited to range {w_range[0]:.3f}-{w_range[1]:.3f} rad/s")
-                
-                # If spec object has other attributes that need to be synchronized, update them too
-                # For example, if spec.S exists, it needs to be updated
-                if hasattr(spec, 'S') and spec.S is not None:
-                    spec.S = spec.S[idx]
-        except Exception as e:
-            logger.warning(f"Error applying frequency range limitation: {str(e)}")
-        
-        # If plotting is requested
-        if plot:
-            # Set title
-            if title is None:
-                title_prefix = "Full Scale " if fullscale else ""
-                title = f"{title_prefix}Spectrum of {channel_name}"
-            
-            if use_plotly:
-                # Use Plotly for plotting
-                try:
-                    import plotly.graph_objects as go
-                    
-                    # Get frequency and spectral density
-                    f = spec.args
-                    S = spec.data
-                    
-                    # Create figure
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=f, y=S, mode='lines', name='Spectrum'
-                    ))
-                    
-                    # Set layout
-                    fig.update_layout(
-                        title=title,
-                        xaxis_title='Angular Frequency (rad/s)',
-                        yaxis_title='Spectral Density',
-                        xaxis=dict(range=[w_range[0], min(w_range[1]*1.05, max(f)*1.05)]),
-                        yaxis=dict(range=[0, max(S)*1.05])
-                    )
-                    
-                    # Display frequency range information
-                    range_text = f"Range: {w_range[0]:.2f}-{w_range[1]:.2f} rad/s"
-                    fig.add_annotation(
-                        xref="paper", yref="paper",
-                        x=0.02, y=0.98,
-                        text=range_text,
-                        showarrow=False,
-                        font=dict(size=10),
-                        bgcolor="rgba(255,255,255,0.8)"
-                    )
-                    
-                    # Save or display figure
-                    if save_html:
-                        fig.write_html(save_html)
-                    if show:
-                        fig.show()
-                except ImportError:
-                    logger.warning("Plotly not installed, will use Matplotlib")
-                    use_plotly = False
-            
-            if not use_plotly:
-                # Use Matplotlib for plotting
-                import matplotlib.pyplot as plt
-                
-                fig, ax = plt.subplots(figsize=(10, 6))
-                ax.plot(spec.args, spec.data, 'b-', linewidth=2)
-                ax.set_title(title)
-                ax.set_xlabel('Angular Frequency (rad/s)')
-                ax.set_ylabel('Spectral Density')
-                ax.grid(True, linestyle='--', alpha=0.7)
-                
-                # Set x-axis range to specified frequency range
-                ax.set_xlim(w_range[0], min(w_range[1]*1.05, max(spec.args)*1.05))
-                ax.set_ylim(0, max(spec.data)*1.05)
-                
-                # Display frequency range information
-                range_text = f"Range: {w_range[0]:.2f}-{w_range[1]:.2f} rad/s"
-                ax.text(0.02, 0.98, range_text, transform=ax.transAxes, 
-                       fontsize=9, va='top', ha='left',
-                       bbox=dict(facecolor='white', alpha=0.8, pad=2))
-                
-                if save_path:
-                    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-                if show:
-                    plt.show()
-                else:
-                    plt.close()
-        
-        return spec
+        return statistic_analysis(self, ch_name, sseg, advanced, visualization, bins, 
+                                save_fig, save_path, use_plotly, fullscale, lam, rho, g)
 
     def print_statistics(self, printTxt=False, printExcel=False):
         """
@@ -2665,7 +2406,7 @@ class PyDAS:
         # Print statistics for each segment
         for idx, segment_stats in enumerate(self.segStatis):
             logger.info(f'Seg{idx:02d}')
-            logger.info('\n' + segment_stats.to_string(float_format='% .3E', justify='center'))
+            logger.info('\n' + segment_stats.to_string(float_format=lambda x: f"% .3E" % x, justify='center'))
         
         
         # Export to files if requested
@@ -2687,7 +2428,7 @@ class PyDAS:
                         infoFile.write('\n')
                         infoFile.write(f'Seg{idx:02d}\n')
                         infoFile.write(segment_stats.to_string(
-                            float_format='% .3E', justify='center'))
+                            float_format=lambda x: f"% .3E" % x, justify='center'))
                 
                 logger.info(f"Statistics exported to: {txt_filename}")
             
@@ -2703,3 +2444,518 @@ class PyDAS:
                 logger.info(f"Statistics exported to: {excel_filename}")
 
         return None
+
+    def copy_channel(self, chName, new_chName=None, sseg='all'):
+        """
+        Copy an existing channel to create a new channel with the same data.
+        
+        Parameters:
+        -----------
+        chName : str
+            Name of the channel to copy
+        new_chName : str, optional
+            Name for the new channel. If None, will use original name + "_copy"
+        sseg : int, list, or 'all', optional
+            Segment(s) to apply the copy operation, default is 'all'
+            
+        Returns:
+        --------
+        bool
+            True if copy was successful, False otherwise
+            
+        Notes:
+        ------
+        - The copy will have the same unit and coefficient as the original channel
+        - If a channel with the new name already exists, it will be overwritten
+        """
+        # Check if source channel exists
+        if chName not in self.chInfo['Name'].values:
+            logger.warning(f"Channel '{chName}' does not exist.")
+            return False
+            
+        # Create new channel name if not provided
+        if new_chName is None:
+            new_chName = f"{chName}_copy"
+            
+        # Get unit and coefficient of original channel
+        idx = self.chInfo.index[self.chInfo['Name'] == chName].tolist()[0]
+        unit = self.chInfo.loc[idx, 'Unit']
+        coef = self.chInfo.loc[idx, 'Coef']
+            
+        # Determine which segments to process
+        if sseg == 'all':
+            segments = list(range(self.__segN__))
+        elif isinstance(sseg, int):
+            if sseg < self.__segN__:
+                segments = [sseg]
+            else:
+                logger.warning(f"Segment {sseg} exceeds the maximum segment number ({self.__segN__ - 1}).")
+                return False
+        elif isinstance(sseg, list):
+            segments = [s for s in sseg if s < self.__segN__]
+            if len(segments) != len(sseg):
+                logger.warning("Some segment indices were invalid and will be skipped.")
+        else:
+            logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
+            return False
+            
+        # Delete the channel first if it already exists
+        if new_chName in self.chInfo['Name'].values:
+            logger.warning(f"Channel '{new_chName}' already exists. Operation canceled.")
+            return False
+            
+        # Copy channel data for first segment
+        first_seg = segments[0]
+        series = self.data[first_seg][chName].copy()
+        self.add_channel(new_chName, unit, series, self.__fs__, coef, 0, first_seg)
+        
+        # For additional segments (if any), manually copy the data
+        for seg in segments[1:]:
+            if chName in self.data[seg].columns:
+                # Copy the data for this segment
+                self.data[seg][new_chName] = self.data[seg][chName].copy()
+                
+                # Update statistics for this segment
+                self.segStatis[seg].loc[new_chName] = [
+                    np.mean(self.data[seg][new_chName]), 
+                    np.std(self.data[seg][new_chName]),
+                    np.amax(self.data[seg][new_chName]), 
+                    np.amin(self.data[seg][new_chName]), 
+                    unit
+                ]
+                
+        logger.info(f"Channel '{chName}' copied to '{new_chName}'")
+        return True
+        
+    def channel_calculate(self, ch1, ch2, operation, new_chName, sseg=0):
+        """
+        对两个通道执行数学运算并创建新的通道
+        
+        Parameters:
+        -----------
+        ch1 : str
+            第一个通道名称
+        ch2 : str
+            第二个通道名称
+        operation : str
+            要执行的运算，可选值: 
+            - 'add'或'+': 加法
+            - 'subtract'或'-': 减法
+            - 'multiply'或'*': 乘法
+            - 'divide'或'/': 除法
+        new_chName : str
+            新通道的名称
+        sseg : int, list, or 'all', optional
+            要处理的数据段，默认为0
+            
+        Returns:
+        --------
+        bool
+            如果操作成功返回True，否则返回False
+            
+        Notes:
+        ------
+        - 加减运算要求两个通道的单位相同
+        - 乘除运算不要求通道单位相同，会自动计算新的单位
+        - 如果新通道名称已存在，操作将被取消
+        """
+        # 检查通道是否存在
+        if ch1 not in self.chInfo['Name'].values:
+            logger.warning(f"Channel '{ch1}' does not exist.")
+            return False
+            
+        if ch2 not in self.chInfo['Name'].values:
+            logger.warning(f"Channel '{ch2}' does not exist.")
+            return False
+            
+        # 检查操作类型并转换符号
+        ops_map = {
+            '+': 'add',
+            '-': 'subtract',
+            '*': 'multiply',
+            '/': 'divide'
+        }
+        
+        if operation in ops_map:
+            operation = ops_map[operation]
+        elif operation not in ['add', 'subtract', 'multiply', 'divide']:
+            valid_operations = ["'add'或'+'", "'subtract'或'-'", "'multiply'或'*'", "'divide'或'/'"]
+            logger.warning(f"Invalid operation '{operation}'. Valid operations are: {valid_operations}")
+            return False
+            
+        # 检查新通道名是否已存在
+        if new_chName in self.chInfo['Name'].values:
+            logger.warning(f"Channel '{new_chName}' already exists. Operation canceled.")
+            return False
+            
+        # 获取通道信息
+        ch1_idx = self.chInfo.index[self.chInfo['Name'] == ch1].tolist()[0]
+        ch2_idx = self.chInfo.index[self.chInfo['Name'] == ch2].tolist()[0]
+        
+        ch1_unit = self.chInfo.loc[ch1_idx, 'Unit']
+        ch2_unit = self.chInfo.loc[ch2_idx, 'Unit']
+        
+        # 检查单位一致性（仅加减运算）
+        if operation in ['add', 'subtract'] and ch1_unit != ch2_unit:
+            logger.warning(f"Cannot {operation} channels with different units: '{ch1_unit}' and '{ch2_unit}'")
+            return False
+            
+        # 确定新通道的单位
+        if operation in ['add', 'subtract']:
+            new_unit = ch1_unit
+        elif operation == 'multiply':
+            # 单位相乘
+            if ch1_unit == '-' or ch2_unit == '-':
+                new_unit = ch1_unit if ch2_unit == '-' else ch2_unit
+            elif ch1_unit == '' or ch2_unit == '':
+                new_unit = ch1_unit if ch2_unit == '' else ch2_unit
+            else:
+                new_unit = f"{ch1_unit}·{ch2_unit}"
+        elif operation == 'divide':
+            # 单位相除
+            if ch1_unit == '-' or ch1_unit == '':
+                new_unit = '-'
+            elif ch2_unit == '-' or ch2_unit == '':
+                new_unit = ch1_unit
+            else:
+                new_unit = f"{ch1_unit}/{ch2_unit}"
+                
+        # 确定要处理的数据段
+        if sseg == 'all':
+            segments = list(range(self.__segN__))
+        elif isinstance(sseg, int):
+            if sseg < self.__segN__:
+                segments = [sseg]
+            else:
+                logger.warning(f"Segment {sseg} exceeds the maximum segment number ({self.__segN__ - 1}).")
+                return False
+        elif isinstance(sseg, list):
+            segments = [s for s in sseg if s < self.__segN__]
+            if len(segments) != len(sseg):
+                logger.warning("Some segment indices were invalid and will be skipped.")
+        else:
+            logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
+            return False
+            
+        # 初始化成功标志
+        success = True
+            
+        # 处理第一个段并创建新通道
+        first_seg = segments[0]
+        
+        try:
+            # 执行运算
+            if operation == 'add':
+                result = self.data[first_seg][ch1] + self.data[first_seg][ch2]
+            elif operation == 'subtract':
+                result = self.data[first_seg][ch1] - self.data[first_seg][ch2]
+            elif operation == 'multiply':
+                result = self.data[first_seg][ch1] * self.data[first_seg][ch2]
+            elif operation == 'divide':
+                # 处理除零问题
+                divisor = self.data[first_seg][ch2].copy()
+                # 将零值替换为NaN以避免除零错误
+                divisor = divisor.replace(0, np.nan)
+                result = self.data[first_seg][ch1] / divisor
+                # 将NaN值替换为0
+                result = result.fillna(0)
+                
+            # 添加新通道
+            # 系数设为1.0，因为已经进行了计算
+            self.add_channel(new_chName, new_unit, result.values, self.__fs__, 1.0, 0, first_seg)
+                
+            # 处理其他段（如果有）
+            for seg in segments[1:]:
+                if ch1 in self.data[seg].columns and ch2 in self.data[seg].columns:
+                    # 执行运算
+                    if operation == 'add':
+                        result = self.data[seg][ch1] + self.data[seg][ch2]
+                    elif operation == 'subtract':
+                        result = self.data[seg][ch1] - self.data[seg][ch2]
+                    elif operation == 'multiply':
+                        result = self.data[seg][ch1] * self.data[seg][ch2]
+                    elif operation == 'divide':
+                        # 处理除零问题
+                        divisor = self.data[seg][ch2].copy()
+                        # 将零值替换为NaN以避免除零错误
+                        divisor = divisor.replace(0, np.nan)
+                        result = self.data[seg][ch1] / divisor
+                        # 将NaN值替换为0
+                        result = result.fillna(0)
+                        
+                    # 添加数据到新通道
+                    self.data[seg][new_chName] = result
+                    
+                    # 更新统计信息
+                    self.segStatis[seg].loc[new_chName] = [
+                        np.mean(result), 
+                        np.std(result),
+                        np.amax(result), 
+                        np.amin(result), 
+                        new_unit
+                    ]
+        except Exception as e:
+            logger.error(f"Error performing {operation} operation: {str(e)}")
+            # 如果已经创建了通道，尝试删除它
+            if new_chName in self.chInfo['Name'].values:
+                self.delete_channel(new_chName)
+            success = False
+            
+        if success:
+            ops_dict = {'add': '+', 'subtract': '-', 'multiply': '*', 'divide': '/'}
+            ops_symbol = ops_dict.get(operation, operation)
+            logger.info(f"Created new channel '{new_chName}' as {ch1} {ops_symbol} {ch2}")
+            
+        return success
+        
+    def channel_apply_function(self, ch, func, new_chName, unit=None, sseg=0):
+        """
+        对单一通道应用自定义函数并创建新的通道
+        
+        Parameters:
+        -----------
+        ch : str
+            要处理的通道名称
+        func : callable 或 str
+            要应用的函数。可以是:
+            - 可调用对象(函数), 如 np.square, math.log, lambda x: x**2
+            - 字符串表达式，如 "x**2", "np.log10(x)", "np.exp(x)"
+        new_chName : str
+            新通道的名称
+        unit : str, optional
+            新通道的单位。如果为None，将根据函数类型尝试推断
+        sseg : int, list, or 'all', optional
+            要处理的数据段，默认为0
+            
+        Returns:
+        --------
+        bool
+            如果操作成功返回True，否则返回False
+            
+        Notes:
+        ------
+        - 如果函数是字符串表达式，将使用eval进行计算，x代表通道数据
+        - 常见函数单位转换：
+          - 平方(x^2): 原单位²
+          - 开方(sqrt(x)): 原单位^(1/2)
+          - 对数(log(x)): 无单位
+          - 指数(exp(x)): 与x相关的单位
+        - 对于不安全的字符串表达式，将拒绝执行
+        """
+        import numpy as np
+        import math
+        
+        # 检查通道是否存在
+        if ch not in self.chInfo['Name'].values:
+            logger.warning(f"Channel '{ch}' does not exist.")
+            return False
+            
+        # 检查新通道名是否已存在
+        if new_chName in self.chInfo['Name'].values:
+            logger.warning(f"Channel '{new_chName}' already exists. Operation canceled.")
+            return False
+            
+        # 获取通道信息
+        ch_idx = self.chInfo.index[self.chInfo['Name'] == ch].tolist()[0]
+        ch_unit = self.chInfo.loc[ch_idx, 'Unit']
+        
+        # 确定要处理的数据段
+        if sseg == 'all':
+            segments = list(range(self.__segN__))
+        elif isinstance(sseg, int):
+            if sseg < self.__segN__:
+                segments = [sseg]
+            else:
+                logger.warning(f"Segment {sseg} exceeds the maximum segment number ({self.__segN__ - 1}).")
+                return False
+        elif isinstance(sseg, list):
+            segments = [s for s in sseg if s < self.__segN__]
+            if len(segments) != len(sseg):
+                logger.warning("Some segment indices were invalid and will be skipped.")
+        else:
+            logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
+            return False
+        
+        # 识别常见函数并推断单位（如果未提供）
+        func_name = None
+        if unit is None:
+            # 如果是字符串表达式，分析它来推断单位
+            if isinstance(func, str):
+                func_expr = func.lower().strip()
+                if any(x in func_expr for x in ['**2', 'square', 'x*x']):
+                    unit = f"{ch_unit}²" if ch_unit not in ['-', ''] else ch_unit
+                    func_name = "square"
+                elif any(x in func_expr for x in ['**3', 'cube', 'x**3']):
+                    unit = f"{ch_unit}³" if ch_unit not in ['-', ''] else ch_unit
+                    func_name = "cube"
+                elif any(x in func_expr for x in ['sqrt', 'x**0.5', 'x**(1/2)']):
+                    unit = f"{ch_unit}^(1/2)" if ch_unit not in ['-', ''] else ch_unit
+                    func_name = "square root"
+                elif any(x in func_expr for x in ['log', 'ln']):
+                    unit = '-'  # 对数无单位
+                    func_name = "logarithm"
+                elif any(x in func_expr for x in ['exp', 'e**']):
+                    unit = '-'  # 指数函数通常改变单位
+                    func_name = "exponential"
+                elif any(x in func_expr for x in ['sin', 'cos', 'tan']):
+                    unit = '-'  # 三角函数无单位
+                    func_name = "trigonometric"
+                elif any(x in func_expr for x in ['abs', 'fabs']):
+                    unit = ch_unit  # 绝对值保持单位不变
+                    func_name = "absolute"
+                else:
+                    unit = '-'  # 默认无法确定单位
+                    func_name = "custom"
+            else:
+                # 如果是可调用对象，尝试通过函数名称推断
+                func_str = str(func)
+                if 'square' in func_str or 'pow' in func_str:
+                    unit = f"{ch_unit}2" if ch_unit not in ['-', ''] else ch_unit
+                    func_name = "square"
+                elif 'cube' in func_str:
+                    unit = f"{ch_unit}3" if ch_unit not in ['-', ''] else ch_unit
+                    func_name = "cube"
+                elif 'sqrt' in func_str:
+                    unit = f"{ch_unit}^(1/2)" if ch_unit not in ['-', ''] else ch_unit
+                    func_name = "square root"
+                elif 'log' in func_str:
+                    unit = '-'
+                    func_name = "logarithm"
+                elif 'exp' in func_str:
+                    unit = '-'
+                    func_name = "exponential"
+                elif any(x in func_str for x in ['sin', 'cos', 'tan']):
+                    unit = '-'
+                    func_name = "trigonometric"
+                elif 'abs' in func_str:
+                    unit = ch_unit
+                    func_name = "absolute"
+                else:
+                    unit = '-'
+                    func_name = "custom"
+        
+        # 初始化成功标志
+        success = True
+        
+        # 处理第一个段并创建新通道
+        first_seg = segments[0]
+        
+        try:
+            x = self.data[first_seg][ch].values
+            
+            # 应用函数
+            if callable(func):
+                # 直接调用函数
+                result = func(x)
+            elif isinstance(func, str):
+                # 检查字符串表达式安全性
+                unsafe_terms = ['import', 'eval', 'exec', 'compile', 'open', 'file', 
+                              'os.', 'sys.', 'subprocess', 'shutil', '__']
+                if any(term in func for term in unsafe_terms):
+                    logger.error(f"Unsafe expression detected: {func}")
+                    return False
+                
+                # 使用eval执行字符串表达式
+                x_series = self.data[first_seg][ch]
+                
+                # 定义一个安全的本地命名空间
+                local_vars = {'x': x_series, 'np': np, 'math': math}
+                
+                try:
+                    result = eval(func, {"__builtins__": {}}, local_vars)
+                    # 如果结果是pandas.Series，转换为numpy数组
+                    if hasattr(result, 'values'):
+                        result = result.values
+                except Exception as e:
+                    logger.error(f"Error evaluating expression '{func}': {str(e)}")
+                    return False
+            else:
+                logger.error(f"Invalid function type: {type(func)}. Must be callable or string.")
+                return False
+            
+            # 添加新通道
+            self.add_channel(new_chName, unit, result, self.__fs__, 1.0, 0, first_seg)
+            
+            # 处理其他段（如果有）
+            for seg in segments[1:]:
+                if ch in self.data[seg].columns:
+                    x = self.data[seg][ch]
+                    
+                    # 应用函数
+                    if callable(func):
+                        result = func(x)
+                    elif isinstance(func, str):
+                        local_vars = {'x': x, 'np': np, 'math': math}
+                        result = eval(func, {"__builtins__": {}}, local_vars)
+                        if hasattr(result, 'values'):
+                            result = result.values
+                    
+                    # 添加数据到新通道
+                    self.data[seg][new_chName] = result
+                    
+                    # 更新统计信息
+                    self.segStatis[seg].loc[new_chName] = [
+                        np.mean(result), 
+                        np.std(result),
+                        np.amax(result), 
+                        np.amin(result), 
+                        unit
+                    ]
+        except Exception as e:
+            logger.error(f"Error applying function to channel: {str(e)}")
+            # 如果已经创建了通道，尝试删除它
+            if new_chName in self.chInfo['Name'].values:
+                self.delete_channel(new_chName)
+            success = False
+        
+        if success:
+            if func_name:
+                logger.info(f"Created new channel '{new_chName}' by applying {func_name} function to '{ch}'")
+            else:
+                logger.info(f"Created new channel '{new_chName}' by applying custom function to '{ch}'")
+        
+        return success
+
+    def _findtrans(self, unit, transDict):
+        """
+        Compatibility wrapper for the findtrans function in utils.py.
+        
+        Parameters:
+        -----------
+        unit : str
+            Unit to be converted
+        transDict : dict
+            Dictionary of unit conversion rules
+            
+        Returns:
+        --------
+        list
+            Result from utils.findtrans
+            
+        Notes:
+        ------
+        This method is maintained for backward compatibility.
+        New code should use utils.findtrans directly.
+        """
+        return findtrans(unit, transDict)
+        
+    def _get_default_transDict(self, g=9.807):
+        """
+        Compatibility wrapper for the get_default_transDict function in utils.py.
+        
+        Parameters:
+        -----------
+        g : float, optional
+            Gravitational acceleration in m/s², default is 9.807
+            
+        Returns:
+        --------
+        dict
+            Default unit conversion dictionary
+            
+        Notes:
+        ------
+        This method is maintained for backward compatibility.
+        New code should use utils.get_default_transDict directly.
+        """
+        return get_default_transDict(g)

@@ -356,3 +356,139 @@ if NUMBA_AVAILABLE:
                     result[i] = weight_left * series[pos_left] + weight_right * series[pos_right]
         
         return result 
+
+# Trans cache used by findtrans function for performance optimization
+_global_trans_cache = {}
+
+def get_default_transDict(g=9.807):
+    """
+    Get default unit conversion dictionary for scale transformations.
+    
+    Parameters:
+    -----------
+    g : float, optional
+        Gravitational acceleration in m/s², default is 9.807
+        
+    Returns:
+    --------
+    dict
+        Dictionary of unit conversion rules
+        
+    Notes:
+    ------
+    - Keys are original units
+    - Values are lists where:
+      * First element is the new unit
+      * Second element is a numpy array with:
+        - [0]: Unit conversion coefficient
+        - [1]: Power for density (rho)
+        - [2]: Power for scale factor (lambda)
+    """
+    return {
+        'kg': ['kN', np.array([g * 0.001, 1.0, 3.0])],
+        'cm': ['m', np.array([0.01, 0.0, 1.0])],
+        'mm': ['m', np.array([0.001, 0.0, 1.0])],
+        'm': ['m', np.array([1, 0.0, 1.0])],
+        's': ['s', np.array([1, 0.0, 0.5])],
+        'deg': ['deg', np.array([1, 0.0, 0.0])],
+        'rad': ['rad', np.array([1, 0.0, 0.0])],
+        'n': ['kn', np.array([0.001, 1.0, 3.0])],  # Added lowercase unit to avoid conversion issues
+        'kn': ['kn', np.array([1, 0.0, 0.0])],
+        '%': ['%', np.array([1, 0.0, 0.0])],
+        '-': ['-', np.array([1, 0.0, 0.0])]
+    }
+
+def findtrans(unit, transDict, clear_cache=False):
+    """
+    Find unit conversion factors for scaling.
+    
+    Parameters:
+    -----------
+    unit : str
+        Unit to be converted
+    transDict : dict
+        Dictionary of unit conversion rules
+    clear_cache : bool, optional
+        Whether to clear the cache, default is False
+        
+    Returns:
+    --------
+    list
+        [new_unit, coefficients_array] where coefficients_array contains
+        [unit_coeff, rho_power, lambda_power]
+    
+    Notes:
+    ------
+    - Handles composite units with / (division) and . (multiplication)
+    - Handles units with numeric suffixes (e.g., m2 for square meters)
+    - Includes caching for performance optimization
+    - Returns default values if unit cannot be identified
+    """
+    global _global_trans_cache
+    
+    # Clear cache if requested
+    if clear_cache:
+        _global_trans_cache = {}
+    
+    # Convert to lowercase and strip whitespace
+    unit = unit.lower().strip()
+    
+    # Check if result is already in cache
+    if unit in _global_trans_cache:
+        return _global_trans_cache[unit]
+    
+    # Basic unit lookup
+    if unit in transDict:
+        trans = transDict[unit]
+        _global_trans_cache[unit] = trans
+        return trans
+    # Handle units with division (e.g. m/s)
+    elif '/' in unit:
+        unitUpper, unitLower = unit.split('/')
+        transUpper = findtrans(unitUpper, transDict)
+        transLower = findtrans(unitLower, transDict)
+        trans = [transUpper[0] + '/' + transLower[0], np.array([0.0, 0.0, 0.0])]
+        trans[1][0] = transUpper[1][0] / transLower[1][0]
+        trans[1][1] = transUpper[1][1] - transLower[1][1]
+        trans[1][2] = transUpper[1][2] - transLower[1][2]
+        _global_trans_cache[unit] = trans
+        return trans
+    # Handle units with dot notation (e.g. n.m)
+    elif '.' in unit:
+        unitWithDot = unit.split('.')
+        transU = []
+        transN1 = np.array([])
+        transN2 = np.array([])
+        transN3 = np.array([])
+        for uWithDot in unitWithDot:
+            transWithDot = findtrans(uWithDot, transDict)
+            transU.append(transWithDot[0])
+            transN1 = np.append(transN1, transWithDot[1][0])
+            transN2 = np.append(transN2, transWithDot[1][1])
+            transN3 = np.append(transN3, transWithDot[1][2])
+        trans = ['.'.join(transU), np.array([1.0, 0.0, 0.0])]
+        for x in np.nditer(transN1):
+            trans[1][0] *= x
+        trans[1][1] = transN2.sum()
+        trans[1][2] = transN3.sum()
+        _global_trans_cache[unit] = trans
+        return trans
+    # Handle units with numeric suffix (e.g. m2)
+    elif unit[-1].isdigit():
+        n = int(unit[-1])
+        unit_base = unit[0:-1]
+        if unit_base in transDict:
+            trans_temp = transDict[unit_base]
+            trans = [trans_temp[0] + str(n), np.array([1.0, 0.0, 0.0])]
+            trans[1][0] = trans_temp[1][0]**n
+            trans[1][1] = trans_temp[1][1] * n
+            trans[1][2] = trans_temp[1][2] * n
+            _global_trans_cache[unit] = trans
+            return trans
+        else:
+            logger.warning(f"Input unit '{unit}' cannot be identified, using default values.")
+            return [unit, np.array([1.0, 0.0, 0.0])]
+    # Unidentified units use default values
+    else:
+        logger.warning(f"Input unit '{unit}' cannot be identified, using default values.")
+        return [unit, np.array([1.0, 0.0, 0.0])] 
