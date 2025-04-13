@@ -367,6 +367,47 @@ data.statistic_analysis("current_profile",
                         use_plotly=False)     # 使用matplotlib代替plotly
 ```
 
+### Extreme Value Analysis
+
+```python
+# 基本极值分析
+results = data.extreme_analysis("wave_height")
+
+# 自定义峰值检测参数
+results = data.extreme_analysis("wave_height",
+                              peak_prominence=2.0,    # 设置峰值检测的突出度
+                              peak_distance=50)       # 设置峰值之间的最小距离
+
+# 全尺度极值分析
+results = data.extreme_analysis("wave_height",
+                              fullscale=True,        # 转换为原型尺度
+                              lam=50)                # 设置尺度系数
+
+# 自定义可视化选项
+results = data.extreme_analysis("wave_height",
+                              visualization=True,
+                              plotbackend='plotly',  # 使用Plotly后端
+                              save_path='extreme_analysis.png',
+                              save_html='extreme_analysis.html')
+
+# 分析结果处理
+if results:
+    # 获取检测到的峰值
+    pos_peaks = results['peaks_positive']  # 正峰值
+    neg_peaks = results['peaks_negative']  # 负峰值
+    
+    # 获取极值估计
+    if 'return_values' in results:
+        # 100年一遇极值
+        return_100y = results['return_values']['100_year']
+        print(f"100年一遇极值: {return_100y:.2f}")
+        
+        # 置信区间
+        if 'return_value_confidence_intervals' in results:
+            ci = results['return_value_confidence_intervals']['100_year']
+            print(f"95%置信区间: [{ci['lower_95']:.2f}, {ci['upper_95']:.2f}]")
+```
+
 ### Data Export
 
 ```python
@@ -438,6 +479,15 @@ PyDAS is distributed under the MIT License. See the LICENSE file for more inform
 | `plot_histogram(pydas_obj, ch_name, sseg, bins, ...)` | Generate histogram with statistics |
 | `plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg, ...)` | Create XY scatter plot |
 | `spectral_analysis(pydas_obj, channel_name, method, L, ...)` | Perform spectral analysis on channel |
+| `boxplot_channel(pydas_obj, ch_name, sseg, use_peaks, ...)` | Create boxplot visualization of channel data |
+
+### Analysis Module (analysis.py)
+
+| Function | Description |
+|----------|-------------|
+| `spectral_analysis(pydas_obj, channel_name, method, L, ...)` | Perform spectral analysis and return spectrum |
+| `statistic_analysis(pydas_obj, ch_name, sseg, advanced, ...)` | Perform statistical analysis with visualization |
+| `extreme_analysis(pydas_obj, ch_name, sseg, visualization, ...)` | Perform extreme value analysis on channel peaks with GEV/Gumbel distribution fitting and return period calculation |
 
 ### Output Module (output.py)
 

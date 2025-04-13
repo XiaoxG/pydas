@@ -22,7 +22,7 @@ import pandas as pd
 import scipy.stats as stats
 from logger import logger
 from waveModel.timeseries import TimeSeries
-from plot import _plot_statistics_mpl, _plot_statistics_plotly
+from plot import _plot_statistics_mpl, _plot_statistics_plotly, _detect_peaks
 
 def spectral_analysis(pydas_obj, channel_name, method='cov', L=1024, plot=False, title=None, 
                       save_path=None, plotbackend=None, save_html=None,
@@ -227,7 +227,8 @@ def spectral_analysis(pydas_obj, channel_name, method='cov', L=1024, plot=False,
                     xaxis_title='Angular Frequency (rad/s)',
                     yaxis_title='Spectral Density',
                     xaxis=dict(range=[w_range[0], min(w_range[1]*1.05, max(f)*1.05)]),
-                    yaxis=dict(range=[0, max(S)*1.05])
+                    yaxis=dict(range=[0, max(S)*1.05]),
+                    legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="right", x=0.99)
                 )
                 
                 # Display frequency range information
@@ -496,3 +497,821 @@ def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization
     logger.info("\n" + stats_df.to_string(float_format=lambda x: f"% .4E" % x))
     
     return None 
+
+def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
+                   bins=30, peak_prominence=1.0, peak_distance=None,
+                   visualization_backend='matplotlib', save_path=None, save_html=None,
+                   fullscale=True, lam=50, return_period_multipliers=[1, 5, 10],
+                   peak_height=None, threshold=None, width=None, wlen=None, rel_height=0.5):
+    """
+    Perform extreme value analysis on time series data.
+    
+    Parameters
+    ----------
+    pydas_obj : PyDAS
+        The PyDAS object containing the data to analyze.
+    ch_name : str
+        The name of the channel to analyze.
+    sseg : tuple, optional
+        The start and end indices for a segment of the data to analyze.
+    visualization : bool, default=True
+        Whether to create visualizations of the analysis.
+    bins : int, default=30
+        The number of bins to use for the histogram.
+    peak_prominence : float, default=1.0
+        The prominence of peaks to detect.
+    peak_distance : int, optional
+        The minimum distance between peaks to detect.
+    visualization_backend : str, default='matplotlib'
+        The backend to use for visualization ('matplotlib' or 'plotly').
+    save_path : str, optional
+        The path to save the visualization figure (for matplotlib).
+    save_html : str, optional
+        The path to save the visualization as an HTML file (for plotly).
+    fullscale : bool, default=True
+        Whether to use full-scale transformation.
+    lam : float, default=50
+        The lambda parameter for exceedance probability calculation.
+    return_period_multipliers : list, default=[1, 5, 10]
+        Multipliers for return periods based on data duration.
+    peak_height : float or None, default=None
+        Required peak height (same as threshold parameter).
+    threshold : float or None, default=None
+        Required threshold for peaks.
+    width : float or None, default=None
+        Required width of peaks in samples.
+    wlen : int or None, default=None
+        Window length for peak detection.
+    rel_height : float, default=0.5
+        Relative height for peak width calculation.
+    
+    Returns
+    -------
+    dict
+        A dictionary containing the analysis results:
+        - 'peaks_positive': Positive peaks in the data
+        - 'peaks_negative': Negative peaks in the data
+        - 'all_peaks': All peaks (absolute values)
+        - 'duration_seconds': Duration of the data in seconds
+        - 'duration_hours': Duration of the data in hours
+        - 'peak_statistics': Statistics of the peaks
+        - 'exceedance_table': Table of exceedance probabilities
+        - 'extreme_value_model': Parameters of the fitted extreme value model
+        - 'return_values': Return values for specified return periods
+        - 'return_value_confidence_intervals': Confidence intervals for return values
+        - 'visualization': The visualization figure (if visualization=True)
+    """
+    try:
+        # Import necessary libraries
+        import numpy as np
+        import pandas as pd
+        import scipy.stats as stats
+        from scipy import optimize
+        from scipy.signal import find_peaks
+        import matplotlib.pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+        import logging
+
+        logger = logging.getLogger(__name__)
+        
+        # Get data
+        if isinstance(sseg, tuple) and len(sseg) == 2 and sseg[0] >= 0 and sseg[1] < len(pydas_obj.data):
+            # Valid segment
+            if ch_name not in pydas_obj.data[sseg[0]].columns:
+                logger.error(f"Channel '{ch_name}' not found in segment {sseg}")
+                return None
+            
+            # Get data
+            data = pydas_obj.data[sseg[0]][ch_name].copy()
+            
+            # Handle full scale conversion if needed
+            if fullscale and lam is not None:
+                data *= lam
+        elif ch_name in pydas_obj.data[0].columns:
+            # Use all segments combined
+            data = []
+            for seg in pydas_obj.data:
+                if ch_name in seg.columns:
+                    data.append(seg[ch_name])
+            
+            data = pd.concat(data, ignore_index=True)
+            
+            # Handle full scale conversion if needed
+            if fullscale and lam is not None:
+                data *= lam
+        else:
+            logger.error(f"Channel '{ch_name}' not found in data")
+            return None
+        
+        # Ensure data is a numpy array
+        data_array = np.array(data)
+        
+        # 计算数据持续时间
+        dt = 1.0  # 默认采样间隔为1秒
+        
+        # 尝试从pydas对象获取dt
+        if hasattr(pydas_obj, 'dt') and pydas_obj.dt is not None:
+            dt = pydas_obj.dt
+        # 如果有时间数组，尝试从中估计dt
+        elif hasattr(pydas_obj, 'time') and len(pydas_obj.time) > 1:
+            dt = (pydas_obj.time[-1] - pydas_obj.time[0]) / (len(pydas_obj.time) - 1)
+        
+        # 计算数据持续时间（秒）
+        data_duration_seconds = len(data_array) * dt
+        
+        # 转换为小时
+        data_duration_hours = data_duration_seconds / 3600
+        
+        # 直接使用scipy.signal.find_peaks进行峰值检测以获得精确的索引
+        # 检测正峰值
+        pos_peaks_idx, _ = find_peaks(data_array, height=peak_height, threshold=threshold, 
+                                 distance=peak_distance, prominence=peak_prominence, 
+                                 width=width, wlen=wlen, rel_height=rel_height)
+        
+        # 检测负峰值 
+        neg_peaks_idx, _ = find_peaks(-data_array, height=peak_height, threshold=threshold, 
+                                 distance=peak_distance, prominence=peak_prominence, 
+                                 width=width, wlen=wlen, rel_height=rel_height)
+        
+        # 根据索引获取峰值
+        peaks_positive = data_array[pos_peaks_idx] if len(pos_peaks_idx) > 0 else np.array([])
+        peaks_negative = -data_array[neg_peaks_idx] if len(neg_peaks_idx) > 0 else np.array([])
+        
+        # 合并所有峰值的绝对值
+        all_peaks = np.concatenate([np.abs(peaks_positive), np.abs(peaks_negative)])
+        
+        if len(all_peaks) == 0:
+            logger.warning("No peaks detected. Try adjusting peak detection parameters.")
+            return {
+                'peaks_positive': peaks_positive,
+                'peaks_negative': peaks_negative,
+                'all_peaks': all_peaks,
+                'duration_seconds': data_duration_seconds,
+                'duration_hours': data_duration_hours,
+                'message': "No peaks detected. Try adjusting peak detection parameters."
+            }
+
+        # 计算峰值的基本统计信息
+        peak_stats = {
+            'mean': np.mean(all_peaks),
+            'median': np.median(all_peaks),
+            'std': np.std(all_peaks),
+            'min': np.min(all_peaks),
+            'max': np.max(all_peaks),
+            'count': len(all_peaks)
+        }
+        
+        # 计算超越概率和经验分布
+        sorted_peaks = np.sort(all_peaks)[::-1]  # Sort in descending order
+        n = len(sorted_peaks)
+        ranks = np.arange(1, n+1)
+        
+        # Calculate exceedance probabilities using Weibull formula
+        exceedance_prob = ranks / (n + 1)
+        
+        # 设置回归周期基于数据持续时间
+        # 在这里，我们使用小时作为时间单位
+        # 计算回归周期（小时）
+        return_periods = [data_duration_hours * multiplier for multiplier in return_period_multipliers]
+        
+        # 创建适当的标签
+        return_period_labels = []
+        for period in return_periods:
+            if period < 24:  # 小于一天
+                return_period_labels.append(f"{period:.1f} hours")
+            elif period < 24*30:  # 小于一个月（近似）
+                return_period_labels.append(f"{period/24:.1f} days")
+            elif period < 24*365:  # 小于一年
+                return_period_labels.append(f"{period/(24*30):.1f} months")
+            else:  # 一年或以上
+                return_period_labels.append(f"{period/(24*365.25):.1f} years")
+
+        # 拟合极值分布（GEV 和 Gumbel）
+        # 首先尝试GEV分布
+        try:
+            # Fit GEV distribution to peaks
+            gev_params = stats.genextreme.fit(all_peaks)
+            
+            # 为GEV计算AIC（Akaike信息准则）
+            gev_nll = -np.sum(stats.genextreme.logpdf(all_peaks, *gev_params))
+            gev_k = len(gev_params)  # 参数数量
+            gev_aic = 2 * gev_k + 2 * gev_nll
+            
+            # 检查形状参数（shape parameter）
+            shape = gev_params[0]
+            
+            # 计算给定回归周期的回归值
+            # 对于GEV分布，回归值R(T) = μ - σ/ξ * [1 - (-ln(1-1/T))^(-ξ)] 当 ξ≠0
+            # 当 ξ=0 时，R(T) = μ - σ * ln(-ln(1-1/T))
+            gev_return_values = {}
+            gev_confidence_intervals = {}
+            
+            # 使用bootstrap方法计算置信区间
+            n_bootstrap = 1000
+            bootstrap_return_values = {label: [] for label in return_period_labels}
+            
+            # 创建bootstrap样本
+            rng = np.random.RandomState(42)  # 固定随机种子以获得可重复结果
+            for _ in range(n_bootstrap):
+                # 从峰值中有放回抽样
+                bootstrap_sample = rng.choice(all_peaks, size=len(all_peaks), replace=True)
+                try:
+                    # 拟合GEV分布
+                    bootstrap_params = stats.genextreme.fit(bootstrap_sample)
+                    bootstrap_shape = bootstrap_params[0]
+                    
+                    # 计算各回归周期的回归值
+                    for i, T in enumerate(return_periods):
+                        if abs(bootstrap_shape) < 1e-6:  # Shape parameter close to zero
+                            return_val = bootstrap_params[1] - bootstrap_params[2] * np.log(-np.log(1 - 1/T))
+                        else:
+                            return_val = bootstrap_params[1] - (bootstrap_params[2] / bootstrap_shape) * (1 - (-np.log(1 - 1/T)) ** (-bootstrap_shape))
+                        bootstrap_return_values[return_period_labels[i]].append(return_val)
+                except:
+                    # 如果拟合失败，忽略这个bootstrap样本
+                    continue
+            
+            # 计算各回归周期的回归值和置信区间
+            for i, T in enumerate(return_periods):
+                label = return_period_labels[i]
+                if abs(shape) < 1e-6:  # Shape parameter close to zero
+                    return_val = gev_params[1] - gev_params[2] * np.log(-np.log(1 - 1/T))
+                else:
+                    return_val = gev_params[1] - (gev_params[2] / shape) * (1 - (-np.log(1 - 1/T)) ** (-shape))
+                gev_return_values[label] = return_val
+                
+                # 计算95%置信区间（如果bootstrap样本足够）
+                bootstrap_values = bootstrap_return_values[label]
+                if len(bootstrap_values) > 50:  # 确保有足够的bootstrap样本
+                    lower_ci = np.percentile(bootstrap_values, 2.5)
+                    upper_ci = np.percentile(bootstrap_values, 97.5)
+                    gev_confidence_intervals[label] = (lower_ci, upper_ci)
+                else:
+                    gev_confidence_intervals[label] = (None, None)
+            
+            # GEV分布参数
+            gev_model = {
+                'distribution': 'GEV',
+                'shape': gev_params[0],
+                'loc': gev_params[1],
+                'scale': gev_params[2],
+                'aic': gev_aic
+            }
+        except Exception as e:
+            logger.warning(f"Error fitting GEV distribution: {e}")
+            gev_model = None
+            gev_return_values = {}
+            gev_confidence_intervals = {}
+            gev_aic = float('inf')
+        
+        # 拟合Gumbel分布（Generalized Extreme Value分布的特例，形状参数为0）
+        try:
+            # Fit Gumbel distribution to peaks
+            gumbel_params = stats.gumbel_r.fit(all_peaks)
+            
+            # 为Gumbel计算AIC
+            gumbel_nll = -np.sum(stats.gumbel_r.logpdf(all_peaks, *gumbel_params))
+            gumbel_k = len(gumbel_params)  # 参数数量
+            gumbel_aic = 2 * gumbel_k + 2 * gumbel_nll
+            
+            # 计算给定回归周期的回归值
+            # 对于Gumbel分布，回归值R(T) = μ - σ * ln(-ln(1-1/T))
+            gumbel_return_values = {}
+            gumbel_confidence_intervals = {}
+            
+            # 使用bootstrap方法计算置信区间
+            n_bootstrap = 1000
+            bootstrap_return_values = {label: [] for label in return_period_labels}
+            
+            # 创建bootstrap样本
+            rng = np.random.RandomState(42)  # 固定随机种子以获得可重复结果
+            for _ in range(n_bootstrap):
+                # 从峰值中有放回抽样
+                bootstrap_sample = rng.choice(all_peaks, size=len(all_peaks), replace=True)
+                try:
+                    # 拟合Gumbel分布
+                    bootstrap_params = stats.gumbel_r.fit(bootstrap_sample)
+                    
+                    # 计算各回归周期的回归值
+                    for i, T in enumerate(return_periods):
+                        return_val = bootstrap_params[0] + bootstrap_params[1] * (-np.log(-np.log(1 - 1/T)))
+                        bootstrap_return_values[return_period_labels[i]].append(return_val)
+                except:
+                    # 如果拟合失败，忽略这个bootstrap样本
+                    continue
+            
+            # 计算各回归周期的回归值和置信区间
+            for i, T in enumerate(return_periods):
+                label = return_period_labels[i]
+                return_val = gumbel_params[0] + gumbel_params[1] * (-np.log(-np.log(1 - 1/T)))
+                gumbel_return_values[label] = return_val
+                
+                # 计算95%置信区间（如果bootstrap样本足够）
+                bootstrap_values = bootstrap_return_values[label]
+                if len(bootstrap_values) > 50:  # 确保有足够的bootstrap样本
+                    lower_ci = np.percentile(bootstrap_values, 2.5)
+                    upper_ci = np.percentile(bootstrap_values, 97.5)
+                    gumbel_confidence_intervals[label] = (lower_ci, upper_ci)
+                else:
+                    gumbel_confidence_intervals[label] = (None, None)
+            
+            # Gumbel分布参数
+            gumbel_model = {
+                'distribution': 'Gumbel',
+                'loc': gumbel_params[0],
+                'scale': gumbel_params[1],
+                'aic': gumbel_aic
+            }
+        except Exception as e:
+            logger.warning(f"Error fitting Gumbel distribution: {e}")
+            gumbel_model = None
+            gumbel_return_values = {}
+            gumbel_confidence_intervals = {}
+            gumbel_aic = float('inf')
+        
+        # 选择最佳模型（基于AIC值）
+        if gev_aic < gumbel_aic and gev_model is not None:
+            best_model = gev_model
+            return_values = gev_return_values
+            return_value_confidence_intervals = gev_confidence_intervals
+            logger.info("GEV distribution selected as best fit")
+        elif gumbel_model is not None:
+            best_model = gumbel_model
+            return_values = gumbel_return_values
+            return_value_confidence_intervals = gumbel_confidence_intervals
+            logger.info("Gumbel distribution selected as best fit")
+        else:
+            best_model = None
+            return_values = {}
+            return_value_confidence_intervals = {}
+            logger.warning("No valid distribution model could be fitted")
+        
+        # 创建超越概率表
+        exceedance_table = pd.DataFrame({
+            'Peak Value': sorted_peaks,
+            'Exceedance Probability': exceedance_prob,
+            'Return Period (hours)': 1 / exceedance_prob * data_duration_hours / n
+        })
+        
+        # 准备结果字典
+        results = {
+            'peaks_positive': peaks_positive,
+            'peaks_negative': peaks_negative,
+            'all_peaks': all_peaks,
+            'peak_indices': {'positive': pos_peaks_idx, 'negative': neg_peaks_idx},
+            'duration_seconds': data_duration_seconds,
+            'duration_hours': data_duration_hours,
+            'peak_statistics': peak_stats,
+            'exceedance_table': exceedance_table,
+            'extreme_value_model': best_model,
+            'return_values': return_values,
+            'return_value_confidence_intervals': return_value_confidence_intervals,
+            'return_periods': {'periods': return_periods, 'labels': return_period_labels}
+        }
+        
+        # Create visualization if requested
+        if visualization:
+            # Determine backend
+            backend = visualization_backend
+            if backend is None:
+                try:
+                    import plotly
+                    backend = 'plotly'
+                except ImportError:
+                    backend = 'matplotlib'
+            
+            # Create visualization based on backend
+            if backend.lower() == 'plotly':
+                try:
+                    # Create figure with 2x2 subplots
+                    fig = make_subplots(rows=2, cols=2, 
+                                        subplot_titles=("Original Data with Detected Peaks", 
+                                                      "Peak Value Histogram", 
+                                                      "Empirical Exceedance Probability", 
+                                                      "Return Period Plot"),
+                                        specs=[[{}, {}], 
+                                              [{}, {}]])
+                    
+                    # Plot 1: Original data with peaks
+                    time = np.arange(len(data)) / pydas_obj.__fs__
+                    
+                    # Subsample original data if very large
+                    if len(data) > 50000:
+                        step = len(data) // 50000 + 1
+                        plot_time = time[::step]
+                        plot_data = data_array[::step]
+                    else:
+                        plot_time = time
+                        plot_data = data_array
+                    
+                    # Add original data trace
+                    fig.add_trace(
+                        go.Scatter(x=plot_time, y=plot_data, 
+                                 mode='lines', name='Original Data',
+                                 line=dict(color='rgba(0,0,255,0.5)', width=1)),
+                        row=1, col=1
+                    )
+                    
+                    # Add positive peaks with correct time values
+                    if len(pos_peaks_idx) > 0:
+                        # 直接使用索引计算时间
+                        pos_peak_times = pos_peaks_idx / pydas_obj.__fs__
+                        
+                        fig.add_trace(
+                            go.Scatter(x=pos_peak_times, y=peaks_positive, 
+                                     mode='markers', name='Positive Peaks',
+                                     marker=dict(color='red', size=8, symbol='circle')),
+                            row=1, col=1
+                        )
+                    
+                    # Add negative peaks with correct time values
+                    if len(neg_peaks_idx) > 0:
+                        # 直接使用索引计算时间
+                        neg_peak_times = neg_peaks_idx / pydas_obj.__fs__
+                        
+                        fig.add_trace(
+                            go.Scatter(x=neg_peak_times, y=peaks_negative, 
+                                     mode='markers', name='Negative Peaks',
+                                     marker=dict(color='green', size=8, symbol='circle')),
+                            row=1, col=1
+                        )
+                    
+                    # Plot 2: Histogram of peak values
+                    if len(all_peaks) > 0:
+                        # Create histogram
+                        fig.add_trace(
+                            go.Histogram(x=all_peaks, nbinsx=bins, 
+                                       name='Peak Histogram',
+                                       marker=dict(color='rgba(0,0,255,0.7)')),
+                            row=1, col=2
+                        )
+                        
+                        # Add fitted distribution if available
+                        if 'extreme_value_model' in results:
+                            model = results['extreme_value_model']
+                            x = np.linspace(min(all_peaks), max(all_peaks), 100)
+                            
+                            # 只为已知分布类型绘制曲线
+                            if model['distribution'] == 'GEV':
+                                y = model['distribution_object'].pdf(x)
+                                distrib_name = f"GEV (ξ={model['parameters']['shape']:.3f}, μ={model['parameters']['location']:.3f}, σ={model['parameters']['scale']:.3f})"
+                                
+                                # Scale PDF to match histogram scale
+                                bin_width = (max(all_peaks) - min(all_peaks)) / bins
+                                y = y * len(all_peaks) * bin_width
+                                
+                                # Add distribution curve
+                                fig.add_trace(
+                                    go.Scatter(x=x, y=y, mode='lines', name=distrib_name,
+                                             line=dict(color='red', width=2)),
+                                    row=1, col=2
+                                )
+                            elif model['distribution'] == 'Gumbel':
+                                y = model['distribution_object'].pdf(x)
+                                distrib_name = f"Gumbel (μ={model['parameters']['location']:.3f}, σ={model['parameters']['scale']:.3f})"
+                                
+                                # Scale PDF to match histogram scale
+                                bin_width = (max(all_peaks) - min(all_peaks)) / bins
+                                y = y * len(all_peaks) * bin_width
+                                
+                                # Add distribution curve
+                                fig.add_trace(
+                                    go.Scatter(x=x, y=y, mode='lines', name=distrib_name,
+                                             line=dict(color='red', width=2)),
+                                    row=1, col=2
+                                )
+                    
+                    # Plot 3: Empirical exceedance probability
+                    if 'exceedance_table' in results:
+                        exceedance = results['exceedance_table']
+                        
+                        fig.add_trace(
+                            go.Scatter(x=exceedance['Exceedance Probability'], 
+                                     y=exceedance['Peak Value'],
+                                     mode='markers', name='Empirical Exceedance',
+                                     marker=dict(color='blue', size=8)),
+                            row=2, col=1
+                        )
+                        
+                        # Add fitted distribution if available
+                        if 'extreme_value_model' in results:
+                            model = results['extreme_value_model']
+                            x = np.logspace(-3, np.log10(0.9), 100)  # Probabilities from 0.001 to 0.9
+                            
+                            if model['distribution'] == 'GEV':
+                                y = model['distribution_object'].ppf(1-x)
+                                line_name = 'GEV Model'
+                            elif model['distribution'] == 'Gumbel':
+                                y = model['distribution_object'].ppf(1-x)
+                                line_name = 'Gumbel Model'
+                            else:
+                                line_name = 'Fitted Model'
+                                
+                            # Add distribution curve
+                            fig.add_trace(
+                                go.Scatter(x=x, y=y, mode='lines', name=line_name,
+                                         line=dict(color='red', width=2)),
+                                row=2, col=1
+                            )
+                        
+                            # Set log scale for x-axis
+                            fig.update_xaxes(type='log', row=2, col=1)
+                    
+                    # Plot 4: Return period plot
+                    if 'exceedance_table' in results:
+                        exceedance = results['exceedance_table']
+                        
+                        # Convert hours to years for plotting
+                        return_period_years_data = exceedance['Return Period (hours)'] / (24 * 365.25)
+                        
+                        fig.add_trace(
+                            go.Scatter(x=return_period_years_data, 
+                                     y=exceedance['Peak Value'],
+                                     mode='markers', name='Empirical Return Period',
+                                     marker=dict(color='blue', size=8)),
+                            row=2, col=2
+                        )
+                        
+                        # Add fitted distribution if available
+                        if 'extreme_value_model' in results and 'return_values' in results:
+                            # Plot theoretical return periods
+                            rps = np.array(return_periods)
+                            rv_list = [results['return_values'][label] for label in return_period_labels]
+                            
+                            fig.add_trace(
+                                go.Scatter(x=rps, y=rv_list, mode='lines+markers', 
+                                         name='模型回归值',
+                                         line=dict(color='red', width=2),
+                                         marker=dict(color='red', size=10)),
+                                row=2, col=2
+                            )
+                            
+                            # Add confidence interval if available
+                            if 'return_value_confidence_intervals' in results:
+                                # Plot a point for the return period of interest
+                                last_label = return_period_labels[-1]
+                                
+                                if last_label in results['return_value_confidence_intervals']:
+                                    ci = results['return_value_confidence_intervals'][last_label]
+                                    
+                                    # Add CI info to plot
+                                    fig.add_trace(
+                                        go.Scatter(x=[return_periods[-1]], 
+                                                 y=[results['return_values'][last_label]],
+                                                 error_y=dict(
+                                                     type='data',
+                                                     symmetric=False,
+                                                     array=[ci['upper_95'] - results['return_values'][last_label]],
+                                                     arrayminus=[results['return_values'][last_label] - ci['lower_95']],
+                                                     visible=True,
+                                                     color='red',
+                                                     width=3
+                                                 ),
+                                                 mode='markers',
+                                                 name=f'{return_periods[-1]}年值 (95% CI)',
+                                                 marker=dict(color='darkred', size=12, symbol='diamond')),
+                                         row=2, col=2
+                                    )
+                    
+                    # Update layout
+                    channel_info = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == ch_name]
+                    unit = "" if channel_info.empty else channel_info['Unit'].values[0]
+                    
+                    # Add unit to figure title
+                    unit_str = f" [{unit}]" if unit else ""
+                    
+                    # Create plot title
+                    if title is None:
+                        if fullscale:
+                            scale_str = "Full Scale"
+                        else:
+                            scale_str = "Model Scale"
+                        title = f"Extreme Value Analysis for {ch_name}{unit_str} ({scale_str})"
+                    
+                    # Update layout
+                    fig.update_layout(
+                        title=title,
+                        width=1300,  # 增加宽度为图例留出空间
+                        height=900,
+                        legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="right", x=1.2),
+                        margin=dict(r=150)  # 增加右侧边距为图例腾出空间
+                    )
+                    
+                    # Update axes labels
+                    fig.update_xaxes(title_text="Time (s)", row=1, col=1)
+                    fig.update_yaxes(title_text=f"Value{unit_str}", row=1, col=1)
+                    
+                    fig.update_xaxes(title_text="Peak Value", row=1, col=2)
+                    fig.update_yaxes(title_text="Count", row=1, col=2)
+                    
+                    fig.update_xaxes(title_text="Exceedance Probability", row=2, col=1)
+                    fig.update_yaxes(title_text=f"Peak Value{unit_str}", row=2, col=1)
+                    
+                    fig.update_xaxes(title_text="Return Period (years)", row=2, col=2)
+                    fig.update_yaxes(title_text=f"Peak Value{unit_str}", row=2, col=2)
+                    
+                    results['figure'] = fig
+                    
+                    # Save or show figure
+                    if save_html is not None:
+                        fig.write_html(save_html)
+                        logger.info(f"Interactive plot saved to {save_html}")
+                    
+                    if save_path is not None:
+                        fig.write_image(save_path)
+                        logger.info(f"Plot saved to {save_path}")
+                    
+                    if visualization:
+                        fig.show()
+                
+                except ImportError:
+                    logger.warning("Plotly not available, falling back to matplotlib")
+                    backend = 'matplotlib'
+                except Exception as e:
+                    logger.error(f"Error creating Plotly visualization: {str(e)}")
+                    backend = 'matplotlib'
+            
+            # Create matplotlib visualization if Plotly fails or is not selected
+            if backend.lower() in ['matplotlib', 'seaborn']:
+                try:
+                    # Create figure with 2x2 subplots
+                    fig, axs = plt.subplots(2, 2, figsize=(15, 12))
+                    
+                    # Plot 1: Original data with peaks
+                    time = np.arange(len(data)) / pydas_obj.__fs__
+                    
+                    # Subsample original data if very large
+                    if len(data) > 10000:
+                        step = len(data) // 10000 + 1
+                        plot_time = time[::step]
+                        plot_data = data_array[::step]
+                    else:
+                        plot_time = time
+                        plot_data = data_array
+                    
+                    # Plot data
+                    axs[0, 0].plot(plot_time, plot_data, 'b-', alpha=0.5, linewidth=1, label='Data')
+                    
+                    # Add positive peaks with correct time values
+                    if len(pos_peaks_idx) > 0:
+                        # 直接使用索引计算时间
+                        pos_peak_times = pos_peaks_idx / pydas_obj.__fs__
+                        axs[0, 0].plot(pos_peak_times, peaks_positive, 'ro', label='Positive Peaks')
+                    
+                    # Add negative peaks with correct time values
+                    if len(neg_peaks_idx) > 0:
+                        # 直接使用索引计算时间
+                        neg_peak_times = neg_peaks_idx / pydas_obj.__fs__
+                        axs[0, 0].plot(neg_peak_times, peaks_negative, 'go', label='Negative Peaks')
+                    
+                    axs[0, 0].set_title('Original Data with Detected Peaks')
+                    axs[0, 0].set_xlabel('Time (s)')
+                    axs[0, 0].legend()
+                    
+                    # Plot 2: Histogram of peaks
+                    if len(all_peaks) > 0:
+                        axs[0, 1].hist(all_peaks, bins=bins, alpha=0.7, color='blue', label='Peaks')
+                        
+                        # Add fitted distribution if available
+                        if 'extreme_value_model' in results:
+                            model = results['extreme_value_model']
+                            x = np.linspace(min(all_peaks), max(all_peaks), 100)
+                            
+                            # 只为已知分布类型绘制曲线
+                            if model['distribution'] == 'GEV':
+                                y = model['distribution_object'].pdf(x)
+                                distrib_name = f"GEV (ξ={model['parameters']['shape']:.3f}, μ={model['parameters']['location']:.3f}, σ={model['parameters']['scale']:.3f})"
+                                
+                                # Scale PDF to match histogram scale
+                                bin_width = (max(all_peaks) - min(all_peaks)) / bins
+                                y = y * len(all_peaks) * bin_width
+                                
+                                axs[0, 1].plot(x, y, 'r-', linewidth=2, label=distrib_name)
+                                axs[0, 1].legend()
+                            elif model['distribution'] == 'Gumbel':
+                                y = model['distribution_object'].pdf(x)
+                                distrib_name = f"Gumbel (μ={model['parameters']['location']:.3f}, σ={model['parameters']['scale']:.3f})"
+                                
+                                # Scale PDF to match histogram scale
+                                bin_width = (max(all_peaks) - min(all_peaks)) / bins
+                                y = y * len(all_peaks) * bin_width
+                                
+                                axs[0, 1].plot(x, y, 'r-', linewidth=2, label=distrib_name)
+                                axs[0, 1].legend()
+                    
+                    axs[0, 1].set_title('Peak Value Histogram')
+                    axs[0, 1].set_xlabel('Peak Value')
+                    axs[0, 1].set_ylabel('Count')
+                    
+                    # Plot 3: Empirical exceedance probability
+                    if 'exceedance_table' in results:
+                        exceedance = results['exceedance_table']
+                        
+                        axs[1, 0].loglog(exceedance['Exceedance Probability'], 
+                                      exceedance['Peak Value'], 'bo', markersize=6,
+                                      label='Empirical Exceedance')
+                        
+                        # Add fitted distribution if available
+                        if 'extreme_value_model' in results:
+                            model = results['extreme_value_model']
+                            x = np.logspace(-3, np.log10(0.9), 100)  # Probabilities from 0.001 to 0.9
+                            
+                            if model['distribution'] == 'GEV':
+                                y = model['distribution_object'].ppf(1-x)
+                                line_name = 'GEV Model'
+                            elif model['distribution'] == 'Gumbel':
+                                y = model['distribution_object'].ppf(1-x)
+                                line_name = 'Gumbel Model'
+                            else:
+                                line_name = 'Fitted Model'
+                                
+                            axs[1, 0].loglog(x, y, 'r-', linewidth=2, label=line_name)
+                            axs[1, 0].legend()
+                    
+                    axs[1, 0].set_title('Empirical Exceedance Probability')
+                    axs[1, 0].set_xlabel('Exceedance Probability')
+                    axs[1, 0].set_ylabel('Peak Value')
+                    axs[1, 0].grid(True, which='both', ls='-', alpha=0.3)
+                    
+                    # Plot 4: Return period plot
+                    if 'exceedance_table' in results:
+                        exceedance = results['exceedance_table']
+                        
+                        # Convert hours to years for plotting
+                        return_period_years_data = exceedance['Return Period (hours)'] / (24 * 365.25)
+                        
+                        axs[1, 1].loglog(return_period_years_data, exceedance['Peak Value'], 'bo', 
+                                      markersize=6, label='Empirical Return Period')
+                        
+                        # Add fitted distribution if available
+                        if 'extreme_value_model' in results and 'return_values' in results:
+                            # Plot theoretical return periods
+                            rps = np.array(return_periods)
+                            rv_list = [results['return_values'][label] for label in return_period_labels]
+                            
+                            axs[1, 1].loglog(rps, rv_list, 'ro-', linewidth=2, markersize=8,
+                                         label='Model Return Values')
+                            
+                            # Add confidence interval if available
+                            if 'return_value_confidence_intervals' in results:
+                                rp_key = f'{return_period_multipliers[-1]}_year'
+                                
+                                if rp_key in results['return_value_confidence_intervals']:
+                                    ci = results['return_value_confidence_intervals'][rp_key]
+                                    
+                                    # Add CI to plot
+                                    rv_value = results['return_values'][rp_key]
+                                    axs[1, 1].errorbar(return_period_years_data, rv_value,
+                                                    yerr=[[rv_value - ci['lower_95']], 
+                                                          [ci['upper_95'] - rv_value]],
+                                                    fmt='rD', markersize=10, capsize=8, linewidth=2,
+                                                    label=f'{return_period_multipliers[-1]}-year Value (95% CI)')
+                    
+                    axs[1, 1].set_title('Return Period Plot')
+                    axs[1, 1].set_xlabel('Return Period (years)')
+                    axs[1, 1].set_ylabel('Peak Value')
+                    axs[1, 1].grid(True, which='both', ls='-', alpha=0.3)
+                    axs[1, 1].legend()
+                    
+                    # Channel unit
+                    channel_info = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == ch_name]
+                    unit = "" if channel_info.empty else channel_info['Unit'].values[0]
+                    
+                    # Create plot title
+                    if title is None:
+                        if fullscale:
+                            scale_str = "Full Scale"
+                        else:
+                            scale_str = "Model Scale"
+                        title = f"Extreme Value Analysis for {ch_name} [{unit}] ({scale_str})"
+                    
+                    fig.suptitle(title, fontsize=16)
+                    fig.tight_layout(rect=[0, 0, 1, 0.97])
+                    
+                    results['figure'] = fig
+                    
+                    # Save figure
+                    if save_path is not None:
+                        plt.savefig(save_path, dpi=300)
+                        logger.info(f"Plot saved to {save_path}")
+                    
+                    # Show figure
+                    if visualization:
+                        plt.show()
+                    else:
+                        plt.close(fig)
+                    
+                except ImportError:
+                    logger.error("Matplotlib not available")
+                except Exception as e:
+                    logger.error(f"Error creating Matplotlib visualization: {str(e)}")
+        
+        return results
+    
+    except Exception as e:
+        logger.error(f"Error in extreme_analysis: {str(e)}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return None 

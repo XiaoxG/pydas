@@ -135,8 +135,8 @@ import datetime
 from logger import logger, setup_logger, LOG_LEVELS  # 修改回非相对导入
 from utils import diff1d, data_change_fs, get_default_transDict, findtrans  # 添加导入get_default_transDict和findtrans
 from output import write_data, export_to_dat, export_to_mat, export_to_feather, export_to_parquet  # 修改回非相对导入
-from plot import validate_channel, plot_channel, plot_histogram, plot_xy  # 修改回非相对导入
-from analysis import spectral_analysis, statistic_analysis  # 从analysis模块导入分析函数
+from plot import validate_channel, plot_channel, plot_histogram, plot_xy, boxplot_channel  # 修改回非相对导入
+from analysis import spectral_analysis, statistic_analysis, extreme_analysis  # 从analysis模块导入分析函数
 from process import (
     apply_lowpass_filter, 
     apply_highpass_filter, 
@@ -2090,6 +2090,179 @@ class PyDAS:
             logger.error(f"Error in plot_histogram: {str(e)}")
             return None
             
+    def boxplot_channel(self, ch_idx, sseg=0, title=None, xlabel=None, ylabel=None, 
+                  xlim=None, ylim=None, grid=True, show=True, save_path=None, 
+                  plotbackend=None, style=None, save_html=None, dpi=None, width=None, height=None, 
+                  color=None, alpha=0.8, figsize=None, notch=False, vert=True, showfliers=True,
+                  showmeans=False, meanline=False, boxprops=None, whiskerprops=None, 
+                  capprops=None, flierprops=None, medianprops=None, meanprops=None,
+                  pointpos=0, jitter=0.3, boxpoints='outliers', quartilemethod='linear',
+                  boxwidth=0.5, orientation=None, use_peaks=False, separate_pos_neg_peaks=False,
+                  peak_height=None, peak_threshold=None, peak_distance=None, peak_prominence=1.0,
+                  peak_width=None, peak_wlen=None, peak_rel_height=0.5):
+        """
+        创建一个或多个通道的箱线图。
+        
+        Parameters:
+        -----------
+        ch_idx : int, str, or list
+            通道索引、名称或索引/名称列表
+        sseg : int, optional
+            数据段索引, 默认为 0
+        title : str, optional
+            图表标题, 默认为 None (自动生成)
+        xlabel : str, optional
+            X轴标签, 默认为 None (自动生成)
+        ylabel : str, optional
+            Y轴标签, 默认为 None (自动生成)
+        xlim : tuple, optional
+            X轴范围 (min, max), 默认为 None
+        ylim : tuple, optional
+            Y轴范围 (min, max), 默认为 None
+        grid : bool, optional
+            是否显示网格, 默认为 True
+        show : bool, optional
+            是否显示图表, 默认为 True
+        save_path : str, optional
+            图表保存路径, 默认为 None (不保存)
+        plotbackend : str, optional
+            绘图后端 ('plotly', 'matplotlib', 'seaborn', 或 None 表示自动选择), 默认为 None
+        style : str, optional
+            绘图样式, 默认为 None (使用后端默认样式)
+        save_html : str, optional
+            保存交互式HTML的路径, 默认为 None (不保存)
+        dpi : int, optional
+            图像DPI, 默认为 None (使用默认配置)
+        width : int, optional
+            图表宽度(像素), 默认为 None
+        height : int, optional
+            图表高度(像素), 默认为 None
+        color : str or list, optional
+            箱线图颜色, 默认为 None (自动生成)
+        alpha : float, optional
+            透明度, 默认为 0.8
+        figsize : tuple, optional
+            图表尺寸(英寸), 默认为 None (使用默认配置)
+        notch : bool, optional
+            是否使用凹口箱线图, 默认为 False
+        vert : bool, optional
+            对于matplotlib，True表示垂直绘制, 默认为 True
+        showfliers : bool, optional
+            是否显示异常值, 默认为 True
+        showmeans : bool, optional
+            是否显示均值, 默认为 False
+        meanline : bool, optional
+            是否将均值显示为线而不是点, 默认为 False
+        boxprops : dict, optional
+            箱体属性(仅matplotlib), 默认为 None
+        whiskerprops : dict, optional
+            须属性(仅matplotlib), 默认为 None
+        capprops : dict, optional
+            帽属性(仅matplotlib), 默认为 None
+        flierprops : dict, optional
+            异常值属性(仅matplotlib), 默认为 None
+        medianprops : dict, optional
+            中位数线属性(仅matplotlib), 默认为 None
+        meanprops : dict, optional
+            均值属性(仅matplotlib), 默认为 None
+        pointpos : float, optional
+            点位置 - 0表示点位于箱体中心，负/正值将点偏移(仅plotly), 默认为 0
+        jitter : float, optional
+            点抖动程度(仅plotly), 默认为 0.3
+        boxpoints : str, optional
+            显示点的模式 ('all', 'outliers', 'suspectedoutliers', False) (仅plotly), 默认为 'outliers'
+        quartilemethod : str, optional
+            计算四分位数的方法(仅plotly), 默认为 'linear'
+        boxwidth : float, optional
+            箱宽, 默认为 0.5
+        orientation : str, optional
+            'v' 表示垂直, 'h' 表示水平, 默认为 None
+        use_peaks : bool, optional
+            是否只使用峰值数据而不是所有数据点, 默认为 False
+        separate_pos_neg_peaks : bool, optional
+            是否将正峰值和负峰值分开显示, 默认为 False
+        peak_height : float or tuple, optional
+            峰值的高度要求，可为数值或(min, max)元组, 默认为 None
+        peak_threshold : float or tuple, optional
+            峰值的阈值要求，可为数值或(min, max)元组, 默认为 None
+        peak_distance : int, optional
+            峰值之间的最小水平距离, 默认为 None
+        peak_prominence : float or tuple, optional
+            峰值的突出度要求，可为数值或(min, max)元组, 默认为 1.0
+        peak_width : float or tuple, optional
+            峰值的宽度要求，可为数值或(min, max)元组, 默认为 None
+        peak_wlen : int, optional
+            用于计算峰值突出度的窗口长度, 默认为 None
+        peak_rel_height : float, optional
+            用于计算峰值宽度，相对于突出度的百分比, 默认为 0.5
+            
+        Returns:
+        --------
+        Figure object 或 None
+        """
+        try:
+            # 验证通道并转换为通道名称
+            ch_name = validate_channel(self, ch_idx)
+            if ch_name is None:
+                return None
+            
+            return boxplot_channel(
+                pydas_obj=self,
+                ch_name=ch_name,
+                sseg=sseg,
+                title=title,
+                xlabel=xlabel,
+                ylabel=ylabel,
+                xlim=xlim,
+                ylim=ylim,
+                grid=grid,
+                show=show,
+                save_path=save_path,
+                plotbackend=plotbackend,
+                style=style,
+                save_html=save_html,
+                dpi=dpi,
+                width=width,
+                height=height,
+                color=color,
+                alpha=alpha,
+                figsize=figsize,
+                notch=notch,
+                vert=vert,
+                showfliers=showfliers,
+                showmeans=showmeans,
+                meanline=meanline,
+                boxprops=boxprops,
+                whiskerprops=whiskerprops,
+                capprops=capprops,
+                flierprops=flierprops,
+                medianprops=medianprops,
+                meanprops=meanprops,
+                pointpos=pointpos,
+                jitter=jitter,
+                boxpoints=boxpoints,
+                quartilemethod=quartilemethod,
+                boxwidth=boxwidth,
+                orientation=orientation,
+                use_peaks=use_peaks,
+                separate_pos_neg_peaks=separate_pos_neg_peaks,
+                peak_height=peak_height,
+                peak_threshold=peak_threshold,
+                peak_distance=peak_distance,
+                peak_prominence=peak_prominence,
+                peak_width=peak_width,
+                peak_wlen=peak_wlen,
+                peak_rel_height=peak_rel_height
+            )
+        except ImportError as e:
+            logger.error(f"Plot module not found: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error in boxplot_channel: {str(e)}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
+            
     def plot_xy(self, x_ch_idx, y_ch_idx, sseg=0, title=None, 
               xlabel=None, ylabel=None, xlim=None, ylim=None, grid=True, 
               show=True, save_path=None, plotbackend=None, save_html=None,
@@ -2385,6 +2558,76 @@ class PyDAS:
             
         return statistic_analysis(self, ch_name, sseg, advanced, visualization, bins, 
                                 save_fig, save_path, plotbackend, fullscale, lam, rho, g)
+
+    def extreme_analysis(self, ch_name, sseg=0, visualization=True, bins=50, 
+                      peak_prominence=1.0, peak_distance=None, 
+                      visualization_backend='matplotlib', save_path=None, save_html=None,
+                      fullscale=False, lam=None, return_period_multipliers=[1, 5, 10], 
+                      peak_height=None, threshold=None, width=None, wlen=None, rel_height=0.5):
+        """
+        对通道峰值进行极值统计分析。此方法调用analysis模块中的extreme_analysis函数。
+        
+        Parameters:
+        -----------
+        ch_name : str
+            要分析的通道名称
+        sseg : int, optional
+            要分析的数据段索引，默认为0
+        visualization : bool, optional
+            是否可视化结果，默认为True
+        bins : int, optional
+            直方图的箱数，默认为50
+        peak_prominence : float or tuple, optional
+            峰值的突出度要求，默认为1.0
+        peak_distance : int, optional
+            峰值之间的最小水平距离，默认为None
+        visualization_backend : str, optional
+            绘图后端 ('plotly' 或 'matplotlib')，默认为'matplotlib'
+        save_path : str, optional
+            图表保存路径，默认为None
+        save_html : str, optional
+            交互式HTML图表保存路径（仅适用于Plotly后端），默认为None
+        fullscale : bool, optional
+            是否转换为原型尺度，默认为False
+        lam : float, optional
+            尺度系数，仅在fullscale=True时使用，默认为None（使用对象的__lam__属性）
+        return_period_multipliers : list, optional
+            基于数据持续时间的回归期倍数，默认为[1, 5, 10]
+        peak_height : float or tuple, optional
+            峰值的高度要求，默认为None
+        threshold : float or tuple, optional
+            峰值的阈值要求，默认为None
+        width : float or tuple, optional
+            峰值的宽度要求，默认为None
+        wlen : int, optional
+            用于计算峰值突出度的窗口长度，默认为None
+        rel_height : float, optional
+            用于计算峰值宽度的相对高度，默认为0.5
+            
+        Returns:
+        --------
+        dict
+            包含极值分析结果的字典，包括：
+            - 'peaks_positive'：正峰值数组
+            - 'peaks_negative'：负峰值数组
+            - 'all_peaks'：所有峰值绝对值的数组
+            - 'extreme_value_model'：拟合的极值分布参数
+            - 'return_values'：不同回归期的回归值字典
+            - 'exceedance_probabilities'：超越概率表
+            - 'figure'：如果visualization=True，返回图表对象
+            
+        完整文档请参见analysis.extreme_analysis。
+        """
+        
+        # 如果fullscale=True但未提供lam参数，使用对象的__lam__属性
+        if fullscale and lam is None:
+            lam = self.__lam__
+            
+        return extreme_analysis(self, ch_name, sseg, visualization, bins, 
+                           peak_prominence, peak_distance, 
+                           visualization_backend, save_path, save_html,
+                           fullscale, lam, return_period_multipliers, 
+                           peak_height, threshold, width, wlen, rel_height)
 
     def print_statistics(self, printTxt=False, printExcel=False):
         """

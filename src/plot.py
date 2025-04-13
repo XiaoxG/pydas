@@ -12,6 +12,191 @@ import os
 # Set up logging
 logger = logging.getLogger('pydas.plot')
 
+# 检查plotly-resampler库是否可用
+try:
+    import plotly_resampler
+    HAS_PLOTLY_RESAMPLER = True
+    logger.info("plotly-resampler库已加载，将启用大数据集优化功能")
+except ImportError:
+    HAS_PLOTLY_RESAMPLER = False
+    logger.info("未检测到plotly-resampler，建议安装以优化大数据集: pip install plotly-resampler")
+
+def use_webgl_rendering(fig, data_length=None, threshold=10000):
+    """
+    将plotly图表转换为使用WebGL渲染以提高大数据集的性能
+    
+    Parameters:
+    -----------
+    fig : plotly.graph_objects.Figure
+        要优化的plotly图表对象
+    data_length : int, optional
+        数据点数量，如果不提供则从图表数据中估计
+    threshold : int, optional
+        触发WebGL的数据点阈值，默认为10000
+        
+    Returns:
+    --------
+    plotly.graph_objects.Figure
+        优化后的图表对象
+    """
+    try:
+        import plotly.graph_objects as go
+        
+        # 估计数据点数量(如果未提供)
+        if data_length is None:
+            data_length = 0
+            for trace in fig.data:
+                if hasattr(trace, 'x') and trace.x is not None:
+                    data_length = max(data_length, len(trace.x))
+                    
+        # 如果数据量小于阈值，则不需要优化
+        if data_length < threshold:
+            return fig
+            
+        # 转换所有散点图为WebGL模式
+        for i, trace in enumerate(fig.data):
+            if hasattr(trace, 'type') and trace.type == 'scatter':
+                # 获取当前trace的所有属性
+                trace_dict = trace.to_plotly_json()
+                # 修改类型为scattergl
+                trace_dict['type'] = 'scattergl'
+                # 替换原trace
+                fig.data[i] = trace_dict
+                
+        # 其他WebGL优化设置
+        fig.update_layout(
+            uirevision='constant',  # 保持UI状态
+            hovermode='closest',    # 优化悬停性能
+        )
+        
+        logger.info(f"已启用WebGL渲染加速 ({data_length} 数据点)")
+        return fig
+    except Exception as e:
+        logger.warning(f"启用WebGL渲染失败: {e}")
+        return fig  # 返回原始图表
+
+def create_resampable_plot(x, y, name=None, title=None, n_shown_samples=5000):
+    """
+    创建可动态重采样的图表，适用于非常大的时间序列数据集
+    
+    Parameters:
+    -----------
+    x : numpy.ndarray
+        x轴数据
+    y : numpy.ndarray
+        y轴数据
+    name : str, optional
+        数据系列名称
+    title : str, optional
+        图表标题
+    n_shown_samples : int, optional
+        初始显示的数据点数，默认5000
+        
+    Returns:
+    --------
+    FigureResampler or None
+        可重采样图表对象，如果库不可用则返回None
+    """
+    if not HAS_PLOTLY_RESAMPLER:
+        logger.warning("未安装plotly_resampler库，无法使用动态重采样功能")
+        return None
+        
+    try:
+        from plotly_resampler import FigureResampler
+        import plotly.graph_objects as go
+        
+        # 创建基础图表
+        fig = go.Figure()
+        
+        # 添加数据
+        trace_name = name if name else "数据"
+        fig.add_trace(go.Scatter(x=x, y=y, name=trace_name))
+        
+        # 设置布局
+        if title:
+            fig.update_layout(title=title)
+            
+        # 创建可重采样的图表
+        fig_resampler = FigureResampler(
+            fig, 
+            default_n_shown_samples=n_shown_samples,
+            resampled_trace_prefix_suffix=(None, " (重采样)")
+        )
+        
+        logger.info(f"已创建可动态重采样图表 (数据点: {len(x)}, 显示点数: {n_shown_samples})")
+        return fig_resampler
+    except Exception as e:
+        logger.warning(f"创建可重采样图表失败: {e}")
+        return None
+
+def lttb_downsample(x, y, n_out):
+    """
+    使用LTTB (Largest-Triangle-Three-Buckets) 算法进行下采样
+    保留数据的视觉特征
+    
+    Parameters:
+    -----------
+    x : numpy.ndarray
+        x轴数据
+    y : numpy.ndarray
+        y轴数据
+    n_out : int
+        输出点数
+        
+    Returns:
+    --------
+    tuple
+        (x_sampled, y_sampled) 下采样后的数据点
+    """
+    n = len(x)
+    if n <= n_out:
+        return x, y
+        
+    # 始终保留第一点和最后一点
+    sampled_x = np.zeros(n_out)
+    sampled_y = np.zeros(n_out)
+    sampled_x[0] = x[0]
+    sampled_y[0] = y[0]
+    sampled_x[n_out-1] = x[n-1]
+    sampled_y[n_out-1] = y[n-1]
+    
+    # 计算桶大小
+    bucket_size = (n - 2) / (n_out - 2)
+    
+    # 对每个输出点
+    for i in range(1, n_out-1):
+        # 计算三个桶的范围
+        a = int((i - 1) * bucket_size) + 1
+        b = int(i * bucket_size) + 1
+        c = int((i + 1) * bucket_size) + 1 if i < n_out-2 else n-1
+        
+        # 当前点a
+        point_a_x = sampled_x[i-1]
+        point_a_y = sampled_y[i-1]
+        
+        # 计算下一个点c
+        point_c_x = x[c-1]
+        point_c_y = y[c-1]
+        
+        # 在中间桶b中寻找形成最大面积的点
+        max_area = -1
+        max_idx = b
+        
+        for j in range(a, b):
+            area = abs(
+                (point_a_x - point_c_x) * (y[j] - point_a_y) - 
+                (point_a_x - x[j]) * (point_c_y - point_a_y)
+            ) * 0.5
+            if area > max_area:
+                max_area = area
+                max_idx = j
+        
+        # 保存最佳点
+        sampled_x[i] = x[max_idx]
+        sampled_y[i] = y[max_idx]
+    
+    return sampled_x, sampled_y
+
 # Global plot configuration
 PLOT_CONFIG = {
     # 通用尺寸配置
@@ -271,7 +456,9 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
               plotbackend=None, style=None, downsampling=False, max_points=40000, save_html=None,
               dpi=None, width=None, height=None, color=None, alpha=None, linewidth=None, 
               figsize=None, stats=True, table_width=None, column_widths=None,
-              use_dask=True, use_webgl=True, chunk_size=10000, data_decimation='auto'):
+              use_dask=True, use_webgl=True, use_resampler=False, n_shown_samples=5000,
+              chunk_size=10000, data_decimation='auto', fullscale=False, lam=None, 
+              rho=1.025, g=9.807):
     """
     Plot a channel from a PyDAS object, with options for interactive web-based plotting.
     
@@ -304,8 +491,14 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
         column_widths (list): Column widths for statistics table (default: None)
         use_dask (bool): Use Dask for large data processing (default: True)
         use_webgl (bool): Use WebGL for Plotly rendering for better performance (default: True)
+        use_resampler (bool): Use plotly-resampler for dynamic downsampling (default: False)
+        n_shown_samples (int): Number of samples to show initially (default: 5000)
         chunk_size (int): Chunk size for Dask processing (default: 10000)
         data_decimation (str or int): Decimation method for large datasets ('auto', 'lttb', or an integer for step) (default: 'auto')
+        fullscale (bool): Whether to use full scale for plotting (default: False)
+        lam (float): Lambda parameter for full scale (default: None)
+        rho (float): Density parameter for full scale (default: 1.025)
+        g (float): Gravitational acceleration for full scale (default: 9.807)
     
     Returns:
         Figure object (matplotlib.figure.Figure or plotly.graph_objects.Figure)
@@ -344,6 +537,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
         # 获取实际可用的绘图后端
         backend = get_plot_backend(plotbackend)
         if backend is None:
+            logger.error("No available plotting backend found")
             return None
             
         # 应用样式
@@ -397,10 +591,113 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     # Get X-axis data (time)
                     x_data = np.arange(data_length) / pydas_obj.__fs__
                     
+                    # Get channel unit
+                    unit = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]['Unit'].values[0]
+                    
+                    # Apply full scale conversion if requested
+                    if fullscale:
+                        # Make sure we have a valid scale factor
+                        if lam is None:
+                            if hasattr(pydas_obj, '__lam__'):
+                                lam = pydas_obj.__lam__
+                            else:
+                                logger.warning(f"fullscale=True but no lambda parameter provided and no __lam__ attribute found. Using model scale.")
+                                # Continue with model scale
+                        else:
+                            try:
+                                logger.info(f"Converting channel '{channel}' to full scale with λ={lam}")
+                                # Get TimeSeries object in full scale
+                                ts = pydas_obj.channel2fullscale(channel, lam, rho, g)
+                                
+                                if ts is None:
+                                    logger.warning(f"Full scale conversion failed for channel '{channel}', using model scale.")
+                                else:
+                                    # Use the full scale data
+                                    y_data = ts.data
+                                    # Time might also be scaled, use the TimeSeries args if available
+                                    if hasattr(ts, 'args') and ts.args is not None:
+                                        x_data = ts.args
+                                    
+                                    # Check for unit conversion
+                                    from utils import get_default_transDict, findtrans
+                                    try:
+                                        transDict = get_default_transDict(g)
+                                        trans_temp = findtrans(unit, transDict)
+                                        if trans_temp and trans_temp[0]:
+                                            unit = trans_temp[0]
+                                            logger.info(f"Unit converted from model scale to full scale: {unit}")
+                                    except Exception as e:
+                                        logger.warning(f"Unit conversion failed: {e}")
+                                        
+                                    # Update title to indicate full scale
+                                    if title is None:
+                                        title = f"Full Scale Time Series Plot - {channel}"
+                                    elif "Full Scale" not in title:
+                                        title = f"Full Scale: {title}"
+                            except Exception as e:
+                                logger.warning(f"Error in full scale conversion: {e}")
+                                # Continue with model scale
+                    
                     # Store data for statistics calculation
                     stats_data[channel] = {
-                        'unit': pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]['Unit'].values[0]
+                        'unit': unit
                     }
+                    
+                    # Check if we should use plotly-resampler for this large dataset
+                    if use_resampler and not is_list and HAS_PLOTLY_RESAMPLER and data_length > 50000:
+                        logger.info(f"Using plotly-resampler for channel '{channel}' ({data_length} points)")
+                        
+                        # Get channel unit for y-axis label
+                        unit = stats_data[channel]['unit']
+                        
+                        # Create resampable plot
+                        resampler_title = title
+                        if resampler_title is None:
+                            if fullscale:
+                                resampler_title = f"Full Scale Time Series Plot - {channel}"
+                            else:
+                                resampler_title = f"Time Series Plot - {channel}"
+                                
+                        fr = create_resampable_plot(
+                            x=x_data, 
+                            y=y_data, 
+                            name=f"{channel} ({unit})",
+                            title=resampler_title,
+                            n_shown_samples=n_shown_samples
+                        )
+                        
+                        if fr is not None:
+                            # Calculate stats if requested
+                            if stats:
+                                stats_data[channel]['mean'] = y_data.mean()
+                                stats_data[channel]['min'] = y_data.min()
+                                stats_data[channel]['max'] = y_data.max()
+                                stats_data[channel]['std'] = y_data.std()
+                            
+                            # Save if requested
+                            if save_path:
+                                try:
+                                    # Save as PNG
+                                    png_path = save_path + '.png' if not save_path.endswith('.png') else save_path
+                                    fr.write_image(png_path, width=width or 1200, height=height or 800)
+                                    logger.info(f"Saved plot to {png_path}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to save image: {e}")
+                            
+                            if save_html:
+                                try:
+                                    html_path = save_html if save_html.endswith('.html') else save_html + '.html'
+                                    fr.write_html(html_path)
+                                    logger.info(f"Saved interactive HTML to {html_path}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to save HTML: {e}")
+                            
+                            # Show the interactive plot
+                            if show:
+                                fr.show_dash()
+                            
+                            # Return the resampler figure
+                            return fr
                     
                     # 使用配置的统一处理逻辑后的代码
                     # ... [保留原有代码中的数据处理逻辑，如Dask处理、下采样等]
@@ -490,11 +787,16 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     else:
                         scatter_type = go.Scatter
                     
+                    # Create trace name with full scale indication if needed
+                    trace_name = f"{channel} ({unit})"
+                    if fullscale:
+                        trace_name = f"{channel} (Full Scale, {unit})"
+                    
                     fig.add_trace(
                         scatter_type(
                             x=x_data,
                             y=y_data,
-                            name=f"{channel} ({unit})",
+                            name=trace_name,
                             mode='lines',
                             line=dict(color=color_list[i], width=linewidth),
                             opacity=alpha
@@ -553,6 +855,8 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 # Set plot title
                 if title is None:
                     title = "Time Series Plot"
+                    if fullscale:
+                        title = "Full Scale Time Series Plot"
                     if is_list:
                         title += f" (Multiple Channels)"
                     else:
@@ -704,6 +1008,13 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                                 logger.info(f"Downsampling channel '{channel}' from {data_length} to ~{data_length//step} points.")
                                 x_data = x_data[::step]
                                 y_data = y_data.iloc[::step]
+                            
+                            # Calculate stats with pandas
+                            if stats:
+                                stats_data[channel]['mean'] = y_data.mean()
+                                stats_data[channel]['min'] = y_data.min()
+                                stats_data[channel]['max'] = y_data.max()
+                                stats_data[channel]['std'] = y_data.std()
                     else:
                         # Standard approach for smaller datasets
                         if downsampling and data_length > max_points:
@@ -723,6 +1034,8 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 # Set plot title
                 if title is None:
                     title = "Time Series Plot"
+                    if fullscale:
+                        title = "Full Scale Time Series Plot"
                     if is_list:
                         title += f" (Multiple Channels)"
                     else:
@@ -809,7 +1122,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
 
 def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='Count', 
                 bins=50, xlim=None, ylim=None, grid=True, show=True, save_path=None, 
-                use_plotly=True, save_html=None, dpi=300, width=None, height=None, 
+                plotbackend=None, style=None, save_html=None, dpi=300, width=None, height=None, 
                 color=None, alpha=0.6, figsize=(12, 6), fit_gaussian=True, fit_color='red'):
     """
     Plot a histogram of a channel from a PyDAS object.
@@ -827,7 +1140,8 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
         grid (bool): Whether to show grid (default: True)
         show (bool): Whether to display the plot (default: True)
         save_path (str): Path to save the plot (default: None)
-        use_plotly (bool): Use Plotly for interactive web-based plotting (default: True)
+        plotbackend (str): Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
+        style (str): Plot style to use (default: None, uses backend's default style)
         save_html (str): Path to save as interactive HTML (default: None)
         dpi (int): DPI for saved image (default: 300)
         width (int): Width in pixels for Plotly plot (default: None)
@@ -860,13 +1174,22 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
             channel_list = ch_name
             is_list = True
 
+        # 获取实际可用的绘图后端
+        backend = get_plot_backend(plotbackend)
+        if backend is None:
+            logger.error("No available plotting backend found")
+            return None
+            
+        # 应用样式
+        apply_style(backend, style)
+
         # Flag to track if we've successfully created a plot
         plot_created = False
         fig = None
         plt = None  # Initialize plt as None, import later as needed
         
-        # If use_plotly is True, try to use Plotly for interactive web-based plotting
-        if use_plotly:
+        # If backend is plotly, try to use Plotly for interactive web-based plotting
+        if backend == 'plotly':
             try:
                 # Import Plotly modules
                 import plotly.graph_objects as go
@@ -1038,13 +1361,13 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
                 
             except ImportError:
                 logger.warning("Plotly not available. Falling back to matplotlib.")
-                use_plotly = False
+                backend = 'matplotlib'
             except Exception as e:
                 logger.warning(f"Error using Plotly: {str(e)}. Falling back to matplotlib.")
-                use_plotly = False
+                backend = 'matplotlib'
         
-        # If Plotly is not used or not available, use matplotlib
-        if not use_plotly or not plot_created:
+        # If backend is matplotlib/seaborn or plotly failed
+        if backend in ['matplotlib', 'seaborn'] or not plot_created:
             try:
                 import matplotlib.pyplot as plt
                 from matplotlib import gridspec
@@ -1062,19 +1385,24 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
                 else:
                     rows, cols = 3, 3
                 
-                # Create figure with subplots
-                fig = plt.figure(figsize=figsize)
-                gs = gridspec.GridSpec(rows, cols)
+                # Create figure and subplots
+                fig, axes = plt.subplots(rows, cols, figsize=figsize)
+                
+                # Make axes iterable even for a single subplot
+                if n_channels == 1:
+                    axes = np.array([axes])
+                axes = axes.flatten()
                 
                 # Create color palette for multiple channels
                 if is_list and color is None:
                     colors = plt.cm.tab10(np.linspace(0, 1, n_channels))
+                    color_list = colors.tolist()
                 elif not is_list and color is None:
-                    colors = ['blue']
+                    color_list = ['blue']
                 elif isinstance(color, list):
-                    colors = color
+                    color_list = color
                 else:
-                    colors = [color] * n_channels
+                    color_list = [color] * n_channels
                 
                 # Create fit color list
                 if isinstance(fit_color, list):
@@ -1084,12 +1412,8 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
                 
                 # Process each channel
                 for i, channel in enumerate(channel_list):
-                    # Calculate row and column indices
-                    row = i // cols
-                    col = i % cols
-                    
-                    # Create subplot
-                    ax = plt.subplot(gs[row, col])
+                    # Get current axis
+                    ax = axes[i]
                     
                     # Check if channel exists
                     if channel not in pydas_obj.data[sseg].columns:
@@ -1103,7 +1427,7 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
                     unit = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]['Unit'].values[0]
                     
                     # Plot histogram
-                    n, bins, patches = ax.hist(data, bins=bins, alpha=alpha, color=colors[i])
+                    n, bins, patches = ax.hist(data, bins=bins, color=color_list[i], alpha=alpha, edgecolor='black', linewidth=0.5)
                     
                     # Fit Gaussian distribution if requested
                     if fit_gaussian:
@@ -1124,24 +1448,20 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
                         pdf_scaled = pdf * len(data) * bin_width
                         
                         # Plot fit line
-                        ax.plot(x, pdf_scaled, color=fit_color_list[i], linewidth=2)
+                        ax.plot(x, pdf_scaled, linewidth=2, color=fit_color_list[i])
                         
                         # Add fit parameters as text
                         fit_text = f"μ = {mu:.4g}\nσ = {sigma:.4g}"
                         ax.text(0.95, 0.95, fit_text, transform=ax.transAxes,
                                verticalalignment='top', horizontalalignment='right',
-                               bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+                                bbox=dict(facecolor='white', alpha=0.7, edgecolor='gray'))
                     
-                    # Set labels
-                    ax.set_title(f"{channel} ({unit})")
-                    if col == 0:  # First column
-                        ax.set_ylabel(ylabel)
-                    if row == rows - 1:  # Last row
-                        if xlabel is None:
-                            xlabel = f"{channel} ({unit})"
-                        ax.set_xlabel(xlabel)
+                    # Set labels and title
+                    ax.set_xlabel(f"{channel} ({unit})" if xlabel is None else xlabel)
+                    ax.set_ylabel(ylabel)
+                    ax.set_title(channel)
                     
-                    # Set grid
+                    # Apply grid setting
                     ax.grid(grid)
                     
                     # Set axis limits if provided
@@ -1152,38 +1472,38 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
                 
                 # Set global title
                 if title is None:
-                    title = "Histogram Analysis"
+                    fig_title = "Histogram Analysis"
                     if not is_list:
-                        title += f" - {channel_list[0]}"
-                fig.suptitle(title)
+                        fig_title += f" - {channel_list[0]}"
+                else:
+                    fig_title = title
                 
-                # Adjust layout
-                plt.tight_layout()
+                fig.suptitle(fig_title)
+                plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust layout to make room for title
                 
-                # Save figure if requested
+                # Save as image if requested
                 if save_path is not None:
                     plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
-                    logger.info(f"Plot saved to {save_path}")
+                    logger.info(f"Histogram saved to {save_path}")
                 
                 # Show plot if requested
                 if show:
                     plt.show()
-                else:
-                    plt.close(fig)
                 
                 plot_created = True
                 
             except ImportError:
-                logger.error("Neither Plotly nor Matplotlib is available for plotting.")
+                logger.error("Matplotlib not available. Cannot create histogram plot.")
+                return None
+            except Exception as e:
+                logger.error(f"Error creating matplotlib histogram: {str(e)}")
                 return None
         
-        # Return fig object if not showing or return None if showing
-        return None if show else fig
+        # Return figure object
+        return fig
         
     except Exception as e:
         logger.error(f"Error in plot_histogram: {str(e)}")
-        import traceback
-        logger.debug(traceback.format_exc())
         return None
 
 def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None, 
@@ -1198,7 +1518,8 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
          datashade=False, contour_levels=20, sampling_algorithm='lttb',
          memory_efficient=True, bin_size=None, sns_style=None, 
          sns_bins=50, sns_pthresh=0.1, sns_cmap=None,
-         sns_contour_levels=5, sns_contour_color=None, sns_linewidths=None):
+         sns_contour_levels=5, sns_contour_color=None, sns_linewidths=None,
+         use_resampler=False, n_shown_samples=5000):
     """
     Create an XY scatter plot with one channel on the X-axis and another on the Y-axis.
     
@@ -1250,6 +1571,8 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
         sns_contour_levels (int): Number of levels for Seaborn kdeplot (default: 5)
         sns_contour_color (str): Color of contour lines for Seaborn kdeplot (default: None, uses CONFIG default)
         sns_linewidths (float): Line width for Seaborn kdeplot (default: None, uses CONFIG default)
+        use_resampler (bool): Use plotly-resampler for dynamic downsampling (default: False)
+        n_shown_samples (int): Number of samples to show initially (default: 5000)
         
     Returns:
         tuple: (pandas.DataFrame with x and y data, figure object)
@@ -1329,6 +1652,7 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
         # 获取实际可用的绘图后端
         backend = get_plot_backend(plotbackend)
         if backend is None:
+            logger.error("No available plotting backend found")
             return None
             
         # 应用样式
@@ -1512,6 +1836,100 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                 import plotly.graph_objects as go
                 import plotly.express as px
                 from plotly.subplots import make_subplots
+                
+                # 首先检查是否使用plotly-resampler
+                if use_resampler and HAS_PLOTLY_RESAMPLER and len(df) > 10000:
+                    logger.info(f"使用plotly-resampler处理大数据集XY图 ({len(df)} 点)")
+                    
+                    # 创建标题（如果未提供）
+                    if title is None:
+                        title = f"XY Plot: {y_ch_name} vs {x_ch_name}"
+                    
+                    # 创建可重采样图表
+                    fr = create_resampable_plot(
+                        x=df[x_ch_name],
+                        y=df[y_ch_name],
+                        name=f"{y_ch_name} vs {x_ch_name}",
+                        title=title,
+                        n_shown_samples=n_shown_samples
+                    )
+                    
+                    if fr is not None:
+                        # 配置布局
+                        x_axis_label = xlabel if xlabel else f"{x_ch_name} ({x_unit})"
+                        y_axis_label = ylabel if ylabel else f"{y_ch_name} ({y_unit})"
+                        
+                        fr.update_layout(
+                            xaxis_title=x_axis_label,
+                            yaxis_title=y_axis_label,
+                            hovermode='closest',
+                            width=width,
+                            height=height
+                        )
+                        
+                        # 设置坐标轴范围（如果提供）
+                        if xlim:
+                            fr.update_xaxes(range=xlim)
+                        if ylim:
+                            fr.update_yaxes(range=ylim)
+                        
+                        # 如果需要，添加回归线
+                        if fit_line:
+                            try:
+                                # 计算线性回归
+                                from scipy import stats as scipy_stats
+                                
+                                # 移除NaN值
+                                df_clean = df.dropna()
+                                x_fit = df_clean[x_ch_name].values
+                                y_fit = df_clean[y_ch_name].values
+                                
+                                if len(x_fit) > 1:  # 至少需要2个点进行回归
+                                    slope, intercept, r_value, p_value, std_err = scipy_stats.linregress(x_fit, y_fit)
+                                    
+                                    # 创建拟合线
+                                    x_range = np.linspace(df[x_ch_name].min(), df[x_ch_name].max(), 100)
+                                    y_fit_line = intercept + slope * x_range
+                                    
+                                    # 添加拟合线到图表
+                                    fr.add_trace(
+                                        go.Scatter(
+                                            x=x_range,
+                                            y=y_fit_line,
+                                            mode='lines',
+                                            name=f'拟合线 (y = {slope:.4g}x + {intercept:.4g})',
+                                            line=dict(color=fit_color, width=fit_line_width),
+                                            opacity=fit_alpha
+                                        )
+                                    )
+                            except Exception as e:
+                                logger.warning(f"添加拟合线时出错: {e}")
+                        
+                        # 保存图表（如果需要）
+                        if save_path:
+                            try:
+                                # 保存为PNG
+                                png_path = save_path if save_path.endswith('.png') else save_path + '.png'
+                                fr.write_image(png_path, width=width or 1200, height=height or 800)
+                                logger.info(f"图表已保存至 {png_path}")
+                            except Exception as e:
+                                logger.warning(f"保存图像失败: {e}")
+                        
+                        if save_html:
+                            try:
+                                html_path = save_html if save_html.endswith('.html') else save_html + '.html'
+                                fr.write_html(html_path)
+                                logger.info(f"交互式HTML已保存至 {html_path}")
+                            except Exception as e:
+                                logger.warning(f"保存HTML失败: {e}")
+                        
+                        # 显示交互式图表
+                        if show:
+                            fr.show_dash()
+                        
+                        # 返回数据和图表
+                        result_df = df.copy()
+                        return result_df, fr
                 
                 # Create figure
                 fig = go.Figure()
@@ -2506,4 +2924,744 @@ def _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig,
         _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, 
                             data=data, title_override=title_override)
 
-# Function declarations will be added below 
+def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=None, 
+                  xlim=None, ylim=None, grid=True, show=True, save_path=None, 
+                  plotbackend=None, style=None, save_html=None, dpi=None, width=None, height=None, 
+                  color=None, alpha=0.8, figsize=None, notch=False, vert=True, showfliers=True,
+                  showmeans=False, meanline=False, boxprops=None, whiskerprops=None, 
+                  capprops=None, flierprops=None, medianprops=None, meanprops=None,
+                  pointpos=0, jitter=0.3, boxpoints='outliers', quartilemethod='linear',
+                  boxwidth=0.5, orientation=None, use_peaks=False, separate_pos_neg_peaks=False,
+                  peak_height=None, peak_threshold=None, peak_distance=None, peak_prominence=1.0,
+                  peak_width=None, peak_wlen=None, peak_rel_height=0.5):
+    """
+    Plot a boxplot of one or multiple channels from a PyDAS object.
+    
+    Parameters:
+        pydas_obj (PyDAS): The PyDAS object containing channel data
+        ch_name (str or list): Channel name or list of channel names
+        sseg (int): Segment index to plot (default: 0)
+        title (str): Plot title (default: None, auto-generated)
+        xlabel (str): X-axis label (default: None, auto-generated)
+        ylabel (str): Y-axis label (default: None, auto-generated)
+        xlim (tuple): X-axis limits as (min, max) (default: None)
+        ylim (tuple): Y-axis limits as (min, max) (default: None)
+        grid (bool): Whether to show grid (default: True)
+        show (bool): Whether to display the plot (default: True)
+        save_path (str): Path to save the plot (default: None)
+        plotbackend (str): Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
+        style (str): Plot style to use (default: None, uses backend's default style)
+        save_html (str): Path to save as interactive HTML (default: None, only works with plotly backend)
+        dpi (int): DPI for saved image (default: None, uses CONFIG default)
+        width (int): Width in pixels for plot (default: None)
+        height (int): Height in pixels for plot (default: None)
+        color (str or list): Box color(s) (default: None, auto-generated)
+        alpha (float): Transparency level (default: 0.8)
+        figsize (tuple): Figure size in inches (default: None, uses CONFIG default)
+        notch (bool): Whether to create notched boxes (default: False)
+        vert (bool): For matplotlib, if True, boxes are drawn vertical (default: True)
+        showfliers (bool): Whether to show outliers (default: True)
+        showmeans (bool): Whether to show mean line (default: False)
+        meanline (bool): Whether to show the mean as a line instead of a point (default: False)
+        boxprops (dict): Properties for the box (matplotlib only) (default: None)
+        whiskerprops (dict): Properties for the whiskers (matplotlib only) (default: None)
+        capprops (dict): Properties for the caps (matplotlib only) (default: None)
+        flierprops (dict): Properties for the fliers (matplotlib only) (default: None)
+        medianprops (dict): Properties for the median (matplotlib only) (default: None)
+        meanprops (dict): Properties for the mean (matplotlib only) (default: None)
+        pointpos (float): Position of points in boxplot - 0 means points are placed over the center of the box, negative/positive values offset the points (plotly only) (default: 0)
+        jitter (float): Jitter amount for points (plotly only) (default: 0.3)
+        boxpoints (str): Display mode for points ('all', 'outliers', 'suspectedoutliers', False) (plotly only) (default: 'outliers')
+        quartilemethod (str): Method for computing quartiles (plotly only) (default: 'linear')
+        boxwidth (float): Width of boxes (default: 0.5)
+        orientation (str): 'v' for vertical, 'h' for horizontal (default: None)
+        use_peaks (bool): Whether to use peak values for boxplot instead of all data (default: False)
+        separate_pos_neg_peaks (bool): Whether to separate positive and negative peaks into different boxes (default: False)
+        peak_height (float or tuple): Required height of peaks (default: None)
+        peak_threshold (float or tuple): Required threshold of peaks (default: None)
+        peak_distance (int): Required minimal horizontal distance between peaks (default: None) 
+        peak_prominence (float or tuple): Required prominence of peaks (default: 1.0)
+        peak_width (float or tuple): Required width of peaks (default: None)
+        peak_wlen (int): Window length for peak prominence calculation (default: None)
+        peak_rel_height (float): Relative height for peak width calculation (default: 0.5)
+        
+    Returns:
+        object: Figure object or None
+    """
+    try:
+        # Input validation
+        if pydas_obj is None:
+            logger.error("PyDAS object cannot be None")
+            return None
+        
+        if not hasattr(pydas_obj, 'data') or not hasattr(pydas_obj, 'chInfo'):
+            logger.error("Invalid PyDAS object")
+            return None
+        
+        # Validate and convert channel name/index
+        ch_names = validate_channel(pydas_obj, ch_name)
+        if ch_names is None:
+            return None
+        
+        # Determine if single channel or multiple channels
+        # 显式处理单通道情况，避免DataFrame歧义
+        if isinstance(ch_names, list):
+            channel_list = ch_names
+            is_list = True
+        else:
+            # 如果不是列表，那么是单个通道名（字符串）
+            channel_list = [ch_names]
+            is_list = False
+        
+        # Get plot backend
+        backend = get_plot_backend(plotbackend)
+        if backend is None:
+            logger.error("No available plotting backend found.")
+            return None
+        
+        # 确保channel_list中的每个元素都是字符串
+        for i, ch in enumerate(channel_list):
+            if not isinstance(ch, str):
+                logger.warning(f"Channel at index {i} is not a string. Converting to string.")
+                channel_list[i] = str(ch)
+        
+        # Apply style
+        apply_style(backend, style)
+        
+        # Set default figsize if not provided
+        if figsize is None:
+            figsize = PLOT_CONFIG['figsize']['medium']
+        
+        # Set default dpi if not provided
+        if dpi is None:
+            dpi = PLOT_CONFIG['elements']['dpi']
+        
+        # Set default alpha if not provided
+        if alpha is None:
+            alpha = PLOT_CONFIG['elements']['alpha']
+        
+        # Initialize flag to track if plot was created
+        plot_created = False
+        
+        # If backend is plotly
+        if backend == 'plotly':
+            try:
+                import matplotlib.pyplot as plt  # 导入这里需要的plt
+                import plotly.graph_objects as go
+                from plotly.subplots import make_subplots
+                import numpy as np
+                
+                # Create figure with appropriate subplots
+                n_channels = len(channel_list)
+                
+                # Initialize figure
+                fig = go.Figure()
+                
+                # Process each channel
+                data_list = []
+                names_list = []
+                
+                for channel in channel_list:
+                    # 确保channel是字符串
+                    channel = str(channel)
+                    
+                    # Check if channel exists
+                    if channel not in pydas_obj.data[sseg].columns:
+                        logger.warning(f"Channel '{channel}' not found in segment {sseg}, skipping.")
+                        continue
+                    
+                    # Get data
+                    raw_data = pydas_obj.data[sseg][channel].dropna()
+                    
+                    # 确保数据非空
+                    if raw_data.empty:
+                        logger.warning(f"Channel '{channel}' contains no valid data after dropping NaN values, skipping.")
+                        continue
+                    
+                    # 获取通道单位
+                    channel_info = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]
+                    if channel_info.empty:
+                        unit = ""
+                        logger.warning(f"Could not find unit information for channel '{channel}'")
+                    else:
+                        unit = channel_info['Unit'].values[0]
+                    
+                    # 判断是否使用峰值分析
+                    if use_peaks:
+                        # 检测峰值
+                        pos_peaks, neg_peaks = _detect_peaks(
+                            raw_data, 
+                            height=peak_height, 
+                            threshold=peak_threshold,
+                            distance=peak_distance, 
+                            prominence=peak_prominence,
+                            width=peak_width, 
+                            wlen=peak_wlen, 
+                            rel_height=peak_rel_height
+                        )
+                        
+                        # 分离正负峰值处理
+                        if separate_pos_neg_peaks:
+                            # 如果有正峰值，添加到数据列表
+                            if len(pos_peaks) > 0:
+                                data_list.append(pos_peaks)
+                                names_list.append(f"{channel} (+) ({unit})")
+                            else:
+                                logger.warning(f"No positive peaks found for channel '{channel}'")
+                            
+                            # 如果有负峰值，添加到数据列表
+                            if len(neg_peaks) > 0:
+                                data_list.append(neg_peaks)
+                                names_list.append(f"{channel} (-) ({unit})")
+                            else:
+                                logger.warning(f"No negative peaks found for channel '{channel}'")
+                        else:
+                            # 合并所有峰值
+                            all_peaks = np.concatenate([pos_peaks, neg_peaks])
+                            if len(all_peaks) > 0:
+                                data_list.append(all_peaks)
+                                names_list.append(f"{channel} (Peaks) ({unit})")
+                            else:
+                                logger.warning(f"No peaks found for channel '{channel}'")
+                    else:
+                        # 使用全部数据
+                        data_list.append(raw_data)
+                        names_list.append(f"{channel} ({unit})")
+                
+                # 如果没有有效数据，返回None
+                if not data_list:
+                    logger.error("No valid data to plot")
+                    return None
+                
+                # Create color palette for multiple channels
+                if color is None:
+                    colorscale = PLOT_CONFIG['colors']['qualitative']
+                    colors = [f"rgba({int(r*255)},{int(g*255)},{int(b*255)},{alpha})" 
+                             for r, g, b, _ in plt.cm.get_cmap(colorscale)(np.linspace(0, 1, n_channels))]
+                elif isinstance(color, list):
+                    colors = color
+                else:
+                    colors = [color] * n_channels
+                
+                # Determine orientation
+                plot_orientation = orientation or ('v' if vert else 'h')
+                
+                # Add boxplot traces
+                for i, (data, name) in enumerate(zip(data_list, names_list)):
+                    fig.add_trace(go.Box(
+                        y=data if plot_orientation == 'v' else None,
+                        x=data if plot_orientation == 'h' else None,
+                        name=name,
+                        marker_color=colors[i] if i < len(colors) else None,
+                        boxmean=showmeans,
+                        notched=notch,
+                        boxpoints=boxpoints,
+                        jitter=jitter,
+                        pointpos=pointpos,
+                        quartilemethod=quartilemethod,
+                        width=boxwidth,  # 在Plotly中使用width而不是boxwidth
+                        orientation=plot_orientation
+                    ))
+                
+                # Set plot title
+                if title is None:
+                    title = "Boxplot Analysis"
+                    if use_peaks:
+                        title += " (Peak Values)"
+                    if not is_list and channel_list:  # 确保channel_list非空
+                        title += f" - {channel_list[0]}"
+                
+                # Set axis labels
+                x_title = xlabel
+                y_title = ylabel
+                
+                if x_title is None and plot_orientation == 'v':
+                    x_title = "Channel"
+                elif y_title is None and plot_orientation == 'h':
+                    y_title = "Channel"
+                
+                if y_title is None and plot_orientation == 'v':
+                    y_title = "Value"
+                elif x_title is None and plot_orientation == 'h':
+                    x_title = "Value"
+                
+                # Update layout
+                fig.update_layout(
+                    title=title,
+                    xaxis_title=x_title,
+                    yaxis_title=y_title,
+                    boxmode='group',
+                    template=PLOT_CONFIG['style']['plotly'].get(style, PLOT_CONFIG['style']['plotly']['default']),
+                    width=width or 1200,
+                    height=height or 800,
+                    margin=dict(l=50, r=50, t=50, b=50),
+                    font=dict(
+                        family=PLOT_CONFIG['font']['family'],
+                        size=PLOT_CONFIG['font']['size']['medium']
+                    ),
+                )
+                
+                # Update axes
+                fig.update_xaxes(showgrid=grid, zeroline=grid)
+                fig.update_yaxes(showgrid=grid, zeroline=grid)
+                
+                # Set axis limits if provided
+                if xlim is not None:
+                    fig.update_xaxes(range=xlim)
+                if ylim is not None:
+                    fig.update_yaxes(range=ylim)
+                
+                # Save as HTML if requested
+                if save_html is not None:
+                    fig.write_html(save_html)
+                    logger.info(f"Interactive boxplot saved to {save_html}")
+                
+                # Save as image if requested
+                if save_path is not None:
+                    fig.write_image(save_path, width=width or 1200, height=height or 800, scale=2)
+                    logger.info(f"Boxplot saved to {save_path}")
+                
+                # Show plot if requested
+                if show:
+                    plot_settings = {
+                        "scrollZoom": True,
+                        "modeBarButtonsToAdd": ["drawopenpath", "eraseshape"],
+                        "modeBarButtonsToRemove": ["lasso2d"]
+                    }
+                    fig.show(config=plot_settings)
+                
+                plot_created = True
+                
+            except ImportError:
+                logger.warning("Plotly not available. Falling back to matplotlib.")
+                backend = 'matplotlib'
+            except Exception as e:
+                logger.warning(f"Error using Plotly: {str(e)}. Falling back to matplotlib.")
+                backend = 'matplotlib'
+        
+        # If backend is seaborn or matplotlib failed
+        if backend == 'seaborn' or (backend == 'matplotlib' and not plot_created):
+            try:
+                import matplotlib.pyplot as plt
+                import seaborn as sns
+                import numpy as np
+                
+                # Create figure
+                fig, ax = plt.subplots(figsize=figsize)
+                
+                # Prepare data for boxplot
+                data_list = []
+                labels = []
+                
+                # Process each channel
+                for channel in channel_list:
+                    # 确保channel是字符串
+                    channel = str(channel)
+                    
+                    # Check if channel exists
+                    if channel not in pydas_obj.data[sseg].columns:
+                        logger.warning(f"Channel '{channel}' not found in segment {sseg}, skipping.")
+                        continue
+                    
+                    # Get data
+                    raw_data = pydas_obj.data[sseg][channel].dropna()
+                    
+                    # 确保数据非空
+                    if raw_data.empty:
+                        logger.warning(f"Channel '{channel}' contains no valid data after dropping NaN values, skipping.")
+                        continue
+                    
+                    # 获取通道单位
+                    channel_info = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]
+                    if channel_info.empty:
+                        unit = ""
+                        logger.warning(f"Could not find unit information for channel '{channel}'")
+                    else:
+                        unit = channel_info['Unit'].values[0]
+                    
+                    # 判断是否使用峰值分析
+                    if use_peaks:
+                        # 检测峰值
+                        pos_peaks, neg_peaks = _detect_peaks(
+                            raw_data, 
+                            height=peak_height, 
+                            threshold=peak_threshold,
+                            distance=peak_distance, 
+                            prominence=peak_prominence,
+                            width=peak_width, 
+                            wlen=peak_wlen, 
+                            rel_height=peak_rel_height
+                        )
+                        
+                        # 分离正负峰值处理
+                        if separate_pos_neg_peaks:
+                            # 如果有正峰值，添加到数据列表
+                            if len(pos_peaks) > 0:
+                                data_list.append(pos_peaks)
+                                labels.append(f"{channel} (+) ({unit})")
+                            else:
+                                logger.warning(f"No positive peaks found for channel '{channel}'")
+                            
+                            # 如果有负峰值，添加到数据列表
+                            if len(neg_peaks) > 0:
+                                data_list.append(neg_peaks)
+                                labels.append(f"{channel} (-) ({unit})")
+                            else:
+                                logger.warning(f"No negative peaks found for channel '{channel}'")
+                        else:
+                            # 合并所有峰值
+                            all_peaks = np.concatenate([pos_peaks, neg_peaks])
+                            if len(all_peaks) > 0:
+                                data_list.append(all_peaks)
+                                labels.append(f"{channel} (Peaks) ({unit})")
+                            else:
+                                logger.warning(f"No peaks found for channel '{channel}'")
+                    else:
+                        # 使用全部数据
+                        data_list.append(raw_data)
+                        labels.append(f"{channel} ({unit})")
+                
+                # 如果没有有效数据，返回None
+                if not data_list:
+                    logger.error("No valid data to plot")
+                    return None
+                
+                # Create color palette for multiple channels
+                if color is None:
+                    colors = sns.color_palette(PLOT_CONFIG['colors']['qualitative'], n_colors=len(data_list))
+                elif isinstance(color, list):
+                    colors = color
+                else:
+                    colors = [color] * len(data_list)
+                
+                # Create seaborn boxplot
+                props = {}
+                if boxprops is not None: props['boxprops'] = boxprops
+                if whiskerprops is not None: props['whiskerprops'] = whiskerprops
+                if capprops is not None: props['capprops'] = capprops
+                if flierprops is not None: props['flierprops'] = flierprops
+                if medianprops is not None: props['medianprops'] = medianprops
+                if meanprops is not None: props['meanprops'] = meanprops
+                
+                # Create the boxplot with adjusted properties
+                palette = colors[:len(data_list)]
+                
+                # Determine orientation parameters for seaborn
+                orient = "v" if vert else "h"
+                
+                # Create the boxplot
+                sns.boxplot(
+                    data=data_list,
+                    orient=orient,
+                    notch=notch,
+                    showfliers=showfliers,
+                    showmeans=showmeans,
+                    meanline=meanline,
+                    width=boxwidth,
+                    palette=palette,
+                    ax=ax,
+                    **props
+                )
+                
+                # Set xticks and labels
+                # 先设置ticks，再设置ticklabels
+                positions = np.arange(len(labels))
+                if vert:
+                    ax.set_xticks(positions)
+                    ax.set_xticklabels(labels)
+                else:
+                    ax.set_yticks(positions)
+                    ax.set_yticklabels(labels)
+                
+                # Set plot title
+                if title is None:
+                    title = "Boxplot Analysis"
+                    if use_peaks:
+                        title += " (Peak Values)"
+                    if not is_list and channel_list:  # 确保channel_list非空
+                        title += f" - {channel_list[0]}"
+                ax.set_title(title, fontsize=PLOT_CONFIG['font']['size']['title'])
+                
+                # Set axis labels
+                if xlabel is None:
+                    xlabel = "Channel" if vert else "Value"
+                if ylabel is None:
+                    ylabel = "Value" if vert else "Channel"
+                    
+                ax.set_xlabel(xlabel, fontsize=PLOT_CONFIG['font']['size']['label'])
+                ax.set_ylabel(ylabel, fontsize=PLOT_CONFIG['font']['size']['label'])
+                
+                # Apply grid setting
+                ax.grid(grid)
+                
+                # Set axis limits if provided
+                if xlim is not None:
+                    ax.set_xlim(xlim)
+                if ylim is not None:
+                    ax.set_ylim(ylim)
+                
+                # Adjust layout
+                plt.tight_layout()
+                
+                # Save as image if requested
+                if save_path is not None:
+                    plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+                    logger.info(f"Boxplot saved to {save_path}")
+                
+                # Show plot if requested
+                if show:
+                    plt.show()
+                else:
+                    plt.close(fig)
+                
+                plot_created = True
+                
+            except ImportError:
+                logger.warning("Seaborn not available. Falling back to matplotlib.")
+                backend = 'matplotlib'
+            except Exception as e:
+                logger.warning(f"Error using Seaborn: {str(e)}. Falling back to matplotlib.")
+                backend = 'matplotlib'
+        
+        # If backend is matplotlib or seaborn failed
+        if backend == 'matplotlib' and not plot_created:
+            try:
+                import matplotlib.pyplot as plt
+                import numpy as np
+                
+                # Create figure
+                fig, ax = plt.subplots(figsize=figsize)
+                
+                # Prepare data for boxplot
+                data_list = []
+                labels = []
+                
+                # Process each channel
+                for channel in channel_list:
+                    # 确保channel是字符串
+                    channel = str(channel)
+                    
+                    # Check if channel exists
+                    if channel not in pydas_obj.data[sseg].columns:
+                        logger.warning(f"Channel '{channel}' not found in segment {sseg}, skipping.")
+                        continue
+                    
+                    # Get data
+                    raw_data = pydas_obj.data[sseg][channel].dropna()
+                    
+                    # 确保数据非空
+                    if raw_data.empty:
+                        logger.warning(f"Channel '{channel}' contains no valid data after dropping NaN values, skipping.")
+                        continue
+                    
+                    # 获取通道单位
+                    channel_info = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]
+                    if channel_info.empty:
+                        unit = ""
+                        logger.warning(f"Could not find unit information for channel '{channel}'")
+                    else:
+                        unit = channel_info['Unit'].values[0]
+                    
+                    # 判断是否使用峰值分析
+                    if use_peaks:
+                        # 检测峰值
+                        pos_peaks, neg_peaks = _detect_peaks(
+                            raw_data, 
+                            height=peak_height, 
+                            threshold=peak_threshold,
+                            distance=peak_distance, 
+                            prominence=peak_prominence,
+                            width=peak_width, 
+                            wlen=peak_wlen, 
+                            rel_height=peak_rel_height
+                        )
+                        
+                        # 分离正负峰值处理
+                        if separate_pos_neg_peaks:
+                            # 如果有正峰值，添加到数据列表
+                            if len(pos_peaks) > 0:
+                                data_list.append(pos_peaks)
+                                labels.append(f"{channel} (+) ({unit})")
+                            else:
+                                logger.warning(f"No positive peaks found for channel '{channel}'")
+                            
+                            # 如果有负峰值，添加到数据列表
+                            if len(neg_peaks) > 0:
+                                data_list.append(neg_peaks)
+                                labels.append(f"{channel} (-) ({unit})")
+                            else:
+                                logger.warning(f"No negative peaks found for channel '{channel}'")
+                        else:
+                            # 合并所有峰值
+                            all_peaks = np.concatenate([pos_peaks, neg_peaks])
+                            if len(all_peaks) > 0:
+                                data_list.append(all_peaks)
+                                labels.append(f"{channel} (Peaks) ({unit})")
+                            else:
+                                logger.warning(f"No peaks found for channel '{channel}'")
+                    else:
+                        # 使用全部数据
+                        data_list.append(raw_data)
+                        labels.append(f"{channel} ({unit})")
+                
+                # 如果没有有效数据，返回None
+                if not data_list:
+                    logger.error("No valid data to plot")
+                    return None
+                
+                # Create color palette for multiple channels
+                if color is None:
+                    colors = [plt.cm.get_cmap(PLOT_CONFIG['colors']['qualitative'])(i/10) for i in range(len(data_list))]
+                elif isinstance(color, list):
+                    colors = color
+                else:
+                    colors = [color] * len(data_list)
+                
+                # Create the boxplot
+                box_props = {
+                    'notch': notch,
+                    'vert': vert,
+                    'showfliers': showfliers,
+                    'showmeans': showmeans,
+                    'meanline': meanline,
+                    'patch_artist': True,
+                    'widths': boxwidth,
+                }
+                
+                # Add optional properties if provided
+                if boxprops is not None: box_props['boxprops'] = boxprops
+                if whiskerprops is not None: box_props['whiskerprops'] = whiskerprops
+                if capprops is not None: box_props['capprops'] = capprops
+                if flierprops is not None: box_props['flierprops'] = flierprops
+                if medianprops is not None: box_props['medianprops'] = medianprops
+                if meanprops is not None: box_props['meanprops'] = meanprops
+                
+                # Create the boxplot - 不要在这里设置labels，而是在后面单独设置
+                bplot = ax.boxplot(data_list, **box_props)
+                
+                # Set colors for boxes
+                for patch, color in zip(bplot['boxes'], colors[:len(data_list)]):
+                    patch.set_facecolor(color)
+                    patch.set_alpha(alpha)
+                
+                # Set plot title
+                if title is None:
+                    title = "Boxplot Analysis"
+                    if use_peaks:
+                        title += " (Peak Values)"
+                    if not is_list and channel_list:  # 确保channel_list非空
+                        title += f" - {channel_list[0]}"
+                ax.set_title(title, fontsize=PLOT_CONFIG['font']['size']['title'])
+                
+                # Set axis labels
+                if xlabel is None:
+                    xlabel = "Channel" if vert else "Value"
+                if ylabel is None:
+                    ylabel = "Value" if vert else "Channel"
+                    
+                ax.set_xlabel(xlabel, fontsize=PLOT_CONFIG['font']['size']['label'])
+                ax.set_ylabel(ylabel, fontsize=PLOT_CONFIG['font']['size']['label'])
+                
+                # Apply grid setting
+                ax.grid(grid)
+                
+                # Set axis limits if provided
+                if xlim is not None:
+                    ax.set_xlim(xlim)
+                if ylim is not None:
+                    ax.set_ylim(ylim)
+                
+                # 正确设置ticks和ticklabels
+                positions = range(1, len(labels) + 1)  # boxplot positions从1开始
+                if vert:
+                    ax.set_xticks(positions)
+                    ax.set_xticklabels(labels, rotation=45 if len(labels) > 3 else 0, 
+                                     ha='right' if len(labels) > 3 else 'center')
+                else:
+                    ax.set_yticks(positions)
+                    ax.set_yticklabels(labels)
+                
+                # Adjust layout
+                plt.tight_layout()
+                
+                # Save as image if requested
+                if save_path is not None:
+                    plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+                    logger.info(f"Boxplot saved to {save_path}")
+                
+                # Show plot if requested
+                if show:
+                    plt.show()
+                else:
+                    plt.close(fig)
+                
+                plot_created = True
+                
+            except ImportError:
+                logger.error("Matplotlib not available. Cannot create boxplot.")
+                return None
+            except Exception as e:
+                logger.error(f"Error creating matplotlib boxplot: {str(e)}")
+                return None
+        
+        # Return figure object
+        return fig if not show else None
+    
+    except Exception as e:
+        logger.error(f"Error in boxplot_channel: {str(e)}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return None
+
+# 添加峰值检测函数
+
+def _detect_peaks(data, height=None, threshold=None, distance=None, prominence=None, width=None, wlen=None, rel_height=0.5):
+    """
+    Detect peaks in data using scipy.signal.find_peaks.
+    
+    Parameters:
+    -----------
+    data : array_like
+        1-D array of data
+    height : float or tuple, optional
+        Required height of peaks. Either a number or tuple (h_min, h_max)
+    threshold : float or tuple, optional
+        Required threshold of peaks. Either a number or tuple (threshold_min, threshold_max)
+    distance : int, optional
+        Required minimal horizontal distance between peaks
+    prominence : float or tuple, optional
+        Required prominence of peaks. Either a number or tuple (prom_min, prom_max)
+    width : float or tuple, optional
+        Required width of peaks. Either a number or tuple (width_min, width_max)
+    wlen : int, optional
+        Used for calculation of peak prominence
+    rel_height : float, optional
+        Used to calculate peak width, percentage of prominence
+        
+    Returns:
+    --------
+    tuple
+        (positive_peaks, negative_peaks) - the values of positive and negative peaks
+    """
+    import scipy.signal as signal
+    import numpy as np
+    
+    # Convert pandas Series to numpy array if needed
+    if hasattr(data, 'values'):
+        data = data.values
+    
+    # Find positive peaks
+    pos_peaks_idx, _ = signal.find_peaks(data, height=height, threshold=threshold, 
+                                         distance=distance, prominence=prominence, 
+                                         width=width, wlen=wlen, rel_height=rel_height)
+    
+    # Find negative peaks (invert data and find positive peaks)
+    neg_peaks_idx, _ = signal.find_peaks(-data, height=height, threshold=threshold, 
+                                         distance=distance, prominence=prominence, 
+                                         width=width, wlen=wlen, rel_height=rel_height)
+    
+    # Get peak values
+    pos_peaks = data[pos_peaks_idx] if len(pos_peaks_idx) > 0 else np.array([])
+    neg_peaks = data[neg_peaks_idx] if len(neg_peaks_idx) > 0 else np.array([])
+    
+    return pos_peaks, neg_peaks
