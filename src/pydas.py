@@ -120,7 +120,7 @@ Dependencies:
 
 Author: Xiaoxian Guo
 Date: 2025-04-12
-Version: 1.0.3
+Version: 1.0.4
 """
 import sys
 import os
@@ -134,7 +134,7 @@ from waveModel.timeseries import TimeSeries
 import datetime
 from logger import logger, setup_logger, LOG_LEVELS  # 修改回非相对导入
 from utils import diff1d, data_change_fs, get_default_transDict, findtrans  # 添加导入get_default_transDict和findtrans
-from output import write_data, export_to_dat, export_to_mat, export_to_feather, export_to_parquet  # 修改回非相对导入
+from output import write_data, export_to_dat, export_to_mat, export_to_feather, export_to_parquet, export_to_hdf5  # 添加导入export_to_hdf5
 from plot import validate_channel, plot_channel, plot_histogram, plot_xy, boxplot_channel  # 修改回非相对导入
 from analysis import spectral_analysis, statistic_analysis, extreme_analysis  # 从analysis模块导入分析函数
 from process import (
@@ -148,15 +148,6 @@ from process import (
     add_diff1,
     add_diff2
 )
-
-# Import numba for acceleration
-try:
-    from numba import jit, float64, int32, void, prange
-    NUMBA_AVAILABLE = True
-except ImportError:
-    NUMBA_AVAILABLE = False
-    print("Numba not available. Some functions will run slower.")
-
 class PyDAS:
     """
     Python Data Analysis System for processing and analyzing time series data.
@@ -529,27 +520,48 @@ class PyDAS:
         
         Parameters:
         -----------
-        sseg : int, list, or 'all', optional
-            Segment(s) to export, default is 'all'
+        sseg : int or 'all', optional
+            Segment index to export, default is 'all'
         compression : str, optional
             Compression type to use. Options include: 'snappy', 'gzip', 'brotli', 'zstd', 'lz4', 'none'
-            Default is 'zstd' which offers a good balance between compression ratio and speed.
+            Default is 'zstd'
         compression_level : int, optional
-            Compression level for 'gzip', 'brotli', and 'zstd' compressors.
-            Higher values mean better compression, but slower processing.
-            Default is 9 (range typically 1-22 for zstd).
+            Compression level for 'gzip', 'brotli', and 'zstd' compressors
+            Default is 9
             
         Returns:
         --------
         bool
-            True if export was successful, False otherwise
-            
-        Notes:
-        ------
-        The output file(s) will be named based on the original filename with segment number appended.
-        Parquet format is optimized for columnar data and offers excellent compression and read performance.
+            True if export was successful
         """
         return export_to_parquet(self, sseg, compression, compression_level)
+        
+    def to_hdf5(self, filename=None, sseg='all', compression='gzip', 
+               compression_opts=9, include_metadata=True):
+        """
+        Export data to HDF5 file format.
+        
+        Parameters:
+        -----------
+        filename : str, optional
+            Output filename, if None, an auto-generated name will be used
+        sseg : int or 'all', optional
+            Segment index to export, default is 'all'
+        compression : str, optional
+            Compression algorithm, options include 'gzip', 'lzf', 'szip' or None
+            Default is 'gzip'
+        compression_opts : int, optional
+            Compression options, for gzip 0-9 (9 highest compression)
+        include_metadata : bool, optional
+            Whether to include metadata, default is True
+            
+        Returns:
+        --------
+        bool
+            True if export was successful
+        """
+        return export_to_hdf5(self, filename, sseg, compression, 
+                             compression_opts, include_metadata)
 
     def add_channel(self, name, unit, series, fs, coef=1, point_of_move=0, sseg=0):
         """

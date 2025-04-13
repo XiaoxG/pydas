@@ -751,7 +751,8 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                 else:
                     gev_confidence_intervals[label] = (None, None)
             
-            # GEV分布参数
+            # GEV分布参数 - 不直接存储分布对象以避免序列化问题
+            # 而是保存参数，在需要时重新创建分布对象
             gev_model = {
                 'distribution': 'GEV',
                 'shape': gev_params[0],
@@ -817,7 +818,8 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                 else:
                     gumbel_confidence_intervals[label] = (None, None)
             
-            # Gumbel分布参数
+            # Gumbel分布参数 - 不直接存储分布对象以避免序列化问题
+            # 而是保存参数，在需要时重新创建分布对象
             gumbel_model = {
                 'distribution': 'Gumbel',
                 'loc': gumbel_params[0],
@@ -955,8 +957,12 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                             
                             # 只为已知分布类型绘制曲线
                             if model['distribution'] == 'GEV':
-                                y = model['distribution_object'].pdf(x)
-                                distrib_name = f"GEV (ξ={model['parameters']['shape']:.3f}, μ={model['parameters']['location']:.3f}, σ={model['parameters']['scale']:.3f})"
+                                # 使用scipy.stats.genextreme直接创建分布对象
+                                shape = model['shape']
+                                loc = model['loc']
+                                scale = model['scale']
+                                y = stats.genextreme.pdf(x, shape, loc, scale)
+                                distrib_name = f"GEV (ξ={shape:.3f}, μ={loc:.3f}, σ={scale:.3f})"
                                 
                                 # Scale PDF to match histogram scale
                                 bin_width = (max(all_peaks) - min(all_peaks)) / bins
@@ -969,8 +975,11 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                                     row=1, col=2
                                 )
                             elif model['distribution'] == 'Gumbel':
-                                y = model['distribution_object'].pdf(x)
-                                distrib_name = f"Gumbel (μ={model['parameters']['location']:.3f}, σ={model['parameters']['scale']:.3f})"
+                                # 使用scipy.stats.gumbel_r直接创建分布对象
+                                loc = model['loc']
+                                scale = model['scale']
+                                y = stats.gumbel_r.pdf(x, loc, scale)
+                                distrib_name = f"Gumbel (μ={loc:.3f}, σ={scale:.3f})"
                                 
                                 # Scale PDF to match histogram scale
                                 bin_width = (max(all_peaks) - min(all_peaks)) / bins
@@ -1001,10 +1010,15 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                             x = np.logspace(-3, np.log10(0.9), 100)  # Probabilities from 0.001 to 0.9
                             
                             if model['distribution'] == 'GEV':
-                                y = model['distribution_object'].ppf(1-x)
+                                shape = model['shape']
+                                loc = model['loc']
+                                scale = model['scale']
+                                y = stats.genextreme.ppf(1-x, shape, loc, scale)
                                 line_name = 'GEV Model'
                             elif model['distribution'] == 'Gumbel':
-                                y = model['distribution_object'].ppf(1-x)
+                                loc = model['loc']
+                                scale = model['scale']
+                                y = stats.gumbel_r.ppf(1-x, loc, scale)
                                 line_name = 'Gumbel Model'
                             else:
                                 line_name = 'Fitted Model'
@@ -1015,7 +1029,7 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                                          line=dict(color='red', width=2)),
                                 row=2, col=1
                             )
-                        
+                            
                             # Set log scale for x-axis
                             fig.update_xaxes(type='log', row=2, col=1)
                     
@@ -1055,6 +1069,8 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                                 
                                 if last_label in results['return_value_confidence_intervals']:
                                     ci = results['return_value_confidence_intervals'][last_label]
+                                    ci_lower = ci[0] if isinstance(ci, tuple) else ci.get('lower_95', 0)
+                                    ci_upper = ci[1] if isinstance(ci, tuple) else ci.get('upper_95', 0)
                                     
                                     # Add CI info to plot
                                     fig.add_trace(
@@ -1063,16 +1079,16 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                                                  error_y=dict(
                                                      type='data',
                                                      symmetric=False,
-                                                     array=[ci['upper_95'] - results['return_values'][last_label]],
-                                                     arrayminus=[results['return_values'][last_label] - ci['lower_95']],
+                                                     array=[ci_upper - results['return_values'][last_label]],
+                                                     arrayminus=[results['return_values'][last_label] - ci_lower],
                                                      visible=True,
                                                      color='red',
                                                      width=3
                                                  ),
                                                  mode='markers',
-                                                 name=f'{return_periods[-1]}年值 (95% CI)',
+                                                 name=f'{last_label} (95% CI)',
                                                  marker=dict(color='darkred', size=12, symbol='diamond')),
-                                         row=2, col=2
+                                        row=2, col=2
                                     )
                     
                     # Update layout
@@ -1181,23 +1197,32 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                             
                             # 只为已知分布类型绘制曲线
                             if model['distribution'] == 'GEV':
-                                y = model['distribution_object'].pdf(x)
-                                distrib_name = f"GEV (ξ={model['parameters']['shape']:.3f}, μ={model['parameters']['location']:.3f}, σ={model['parameters']['scale']:.3f})"
+                                # 使用scipy.stats.genextreme直接创建分布对象
+                                shape = model['shape']
+                                loc = model['loc']
+                                scale = model['scale']
+                                y = stats.genextreme.pdf(x, shape, loc, scale)
+                                distrib_name = f"GEV (ξ={shape:.3f}, μ={loc:.3f}, σ={scale:.3f})"
                                 
                                 # Scale PDF to match histogram scale
                                 bin_width = (max(all_peaks) - min(all_peaks)) / bins
                                 y = y * len(all_peaks) * bin_width
                                 
+                                # Add distribution curve
                                 axs[0, 1].plot(x, y, 'r-', linewidth=2, label=distrib_name)
                                 axs[0, 1].legend()
                             elif model['distribution'] == 'Gumbel':
-                                y = model['distribution_object'].pdf(x)
-                                distrib_name = f"Gumbel (μ={model['parameters']['location']:.3f}, σ={model['parameters']['scale']:.3f})"
+                                # 使用scipy.stats.gumbel_r直接创建分布对象
+                                loc = model['loc']
+                                scale = model['scale']
+                                y = stats.gumbel_r.pdf(x, loc, scale)
+                                distrib_name = f"Gumbel (μ={loc:.3f}, σ={scale:.3f})"
                                 
                                 # Scale PDF to match histogram scale
                                 bin_width = (max(all_peaks) - min(all_peaks)) / bins
                                 y = y * len(all_peaks) * bin_width
                                 
+                                # Add distribution curve
                                 axs[0, 1].plot(x, y, 'r-', linewidth=2, label=distrib_name)
                                 axs[0, 1].legend()
                     
@@ -1219,10 +1244,15 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                             x = np.logspace(-3, np.log10(0.9), 100)  # Probabilities from 0.001 to 0.9
                             
                             if model['distribution'] == 'GEV':
-                                y = model['distribution_object'].ppf(1-x)
+                                shape = model['shape']
+                                loc = model['loc']
+                                scale = model['scale']
+                                y = stats.genextreme.ppf(1-x, shape, loc, scale)
                                 line_name = 'GEV Model'
                             elif model['distribution'] == 'Gumbel':
-                                y = model['distribution_object'].ppf(1-x)
+                                loc = model['loc']
+                                scale = model['scale']
+                                y = stats.gumbel_r.ppf(1-x, loc, scale)
                                 line_name = 'Gumbel Model'
                             else:
                                 line_name = 'Fitted Model'
@@ -1256,18 +1286,20 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                             
                             # Add confidence interval if available
                             if 'return_value_confidence_intervals' in results:
-                                rp_key = f'{return_period_multipliers[-1]}_year'
+                                last_label = return_period_labels[-1]
                                 
-                                if rp_key in results['return_value_confidence_intervals']:
-                                    ci = results['return_value_confidence_intervals'][rp_key]
+                                if last_label in results['return_value_confidence_intervals']:
+                                    ci = results['return_value_confidence_intervals'][last_label]
+                                    ci_lower = ci[0] if isinstance(ci, tuple) else ci.get('lower_95', 0)
+                                    ci_upper = ci[1] if isinstance(ci, tuple) else ci.get('upper_95', 0)
                                     
                                     # Add CI to plot
-                                    rv_value = results['return_values'][rp_key]
-                                    axs[1, 1].errorbar(return_period_years_data, rv_value,
-                                                    yerr=[[rv_value - ci['lower_95']], 
-                                                          [ci['upper_95'] - rv_value]],
+                                    rv_value = results['return_values'][last_label]
+                                    axs[1, 1].errorbar(return_periods[-1], rv_value,
+                                                    yerr=[[rv_value - ci_lower], 
+                                                          [ci_upper - rv_value]],
                                                     fmt='rD', markersize=10, capsize=8, linewidth=2,
-                                                    label=f'{return_period_multipliers[-1]}-year Value (95% CI)')
+                                                    label=f'{last_label} (95% CI)')
                     
                     axs[1, 1].set_title('Return Period Plot')
                     axs[1, 1].set_xlabel('Return Period (years)')

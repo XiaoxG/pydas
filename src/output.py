@@ -5,6 +5,7 @@ PyDAS Output Module
 Provides data output and file export functionality for the PyDAS system.
 """
 import os
+import datetime
 import re
 import math
 import struct
@@ -514,4 +515,181 @@ def export_to_feather(pydas_obj, sseg='all', compression='zstd'):
             logger.error(f"Error exporting to Feather file: {str(e)}")
             success = False
     
-    return success 
+    return success
+
+def export_to_hdf5(pydas_obj, filename=None, sseg='all', compression='gzip', 
+                  compression_opts=9, include_metadata=True, 
+                  chunks=True, fletcher32=True):
+    """
+    Export PyDAS data to HDF5 format.
+    
+    Parameters:
+    -----------
+    pydas_obj : PyDAS
+        PyDAS object containing the data
+    filename : str, optional
+        Output filename, if None, an auto-generated name will be used
+    sseg : int, list, or 'all', optional
+        Segment(s) to export, default is 'all'
+    compression : str, optional
+        Compression algorithm, options include 'gzip', 'lzf', 'szip' or None
+        Default is 'gzip' which offers good compression ratio
+    compression_opts : int, optional
+        Compression options, for gzip 0-9 (9 highest compression), 
+        for szip a tuple (method, pixel)
+    include_metadata : bool, optional
+        Whether to include metadata, default is True
+    chunks : bool or tuple, optional
+        Chunking strategy, True for auto-chunking, or specify tuple e.g. (1000,)
+    fletcher32 : bool, optional
+        Whether to apply Fletcher32 checksum
+        
+    Returns:
+    --------
+    bool
+        True if export was successful, False otherwise
+        
+    Notes:
+    ------
+    - HDF5 format is suitable for storing large scientific datasets
+    - Supports data compression and chunked access
+    - Provides metadata and hierarchical storage
+    - Requires h5py library
+    """
+    try:
+        import h5py
+
+    except ImportError as e:
+        logger.error(f"Export to HDF5 failed: Missing required library - {str(e)}")
+        logger.error("Please install h5py: pip install h5py")
+        return False
+    
+    # Check if there is data to export
+    if not hasattr(pydas_obj, 'data') or len(pydas_obj.data) == 0:
+        logger.error("No data to export")
+        return False
+    
+    # Auto-generate filename if not specified
+    if filename is None:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"pydas_export_{timestamp}.h5"
+    
+    # Ensure filename has correct extension
+    if not filename.endswith('.h5') and not filename.endswith('.hdf5'):
+        filename += '.h5'
+    
+    # Determine which segments to export
+    if sseg == 'all':
+        segments = list(range(pydas_obj.__segN__))
+    elif isinstance(sseg, int):
+        if sseg < pydas_obj.__segN__:
+            segments = [sseg]
+        else:
+            logger.warning(f"Segment {sseg} exceeds the maximum segment number ({pydas_obj.__segN__ - 1}).")
+            return False
+    elif isinstance(sseg, list):
+        segments = [s for s in sseg if s < pydas_obj.__segN__]
+        if len(segments) != len(sseg):
+            logger.warning("Some segment indices were invalid and will be skipped.")
+    else:
+        logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
+        return False
+    
+    try:
+        # Create HDF5 file
+        with h5py.File(filename, 'w') as f:
+            # Create data group
+            grp_data = f.create_group('data')
+            
+            # Export each data segment
+            for i in segments:
+                if i >= len(pydas_obj.data):
+                    logger.warning(f"Segment index {i} out of range, skipping")
+                    continue
+                
+                # Create segment group
+                seg_group = grp_data.create_group(f'segment_{i}')
+                df = pydas_obj.data[i]
+                
+                # Save each channel's data
+                for col in df.columns:
+                    # Create dataset with compression
+                    data = df[col].values
+                    seg_group.create_dataset(
+                        col, 
+                        data=data,
+                        compression=compression,
+                        compression_opts=compression_opts,
+                        chunks=chunks,
+                        fletcher32=fletcher32
+                    )
+                
+                # Add time index if available
+                if hasattr(df, 'index') and not df.index.empty:
+                    seg_group.create_dataset(
+                        'time_index',
+                        data=df.index.values,
+                        compression=compression,
+                        compression_opts=compression_opts
+                    )
+            
+            # Save metadata if requested
+            if include_metadata:
+                meta_group = f.create_group('metadata')
+                
+                # Save channel information
+                if hasattr(pydas_obj, 'chInfo'):
+                    ch_group = meta_group.create_group('channel_info')
+                    for col in pydas_obj.chInfo.columns:
+                        # Handle string columns (h5py doesn't directly support lists of variable-length strings)
+                        if pydas_obj.chInfo[col].dtype.kind in ['U', 'O']:
+                            # Convert list of strings to fixed-length ASCII string array
+                            data = np.array(pydas_obj.chInfo[col].values, dtype='S100')
+                        else:
+                            data = pydas_obj.chInfo[col].values
+                        
+                        ch_group.create_dataset(col, data=data)
+                
+                # Save segment information
+                if hasattr(pydas_obj, 'segInfo'):
+                    seg_info_group = meta_group.create_group('segment_info')
+                    for col in pydas_obj.segInfo.columns:
+                        if pydas_obj.segInfo[col].dtype.kind in ['U', 'O']:
+                            data = np.array(pydas_obj.segInfo[col].values, dtype='S100')
+                        else:
+                            data = pydas_obj.segInfo[col].values
+                        
+                        seg_info_group.create_dataset(col, data=data)
+                
+                # Save sampling rate
+                if hasattr(pydas_obj, '__fs__'):
+                    meta_group.attrs['sampling_rate'] = pydas_obj.__fs__
+                
+                # Save scale factor
+                if hasattr(pydas_obj, '__lam__'):
+                    meta_group.attrs['scale_factor'] = pydas_obj.__lam__
+                
+                # Save other attributes
+                meta_group.attrs['export_time'] = datetime.datetime.now().isoformat()
+                meta_group.attrs['pydas_version'] = getattr(pydas_obj, '__version__', '1.0.0')
+                
+                # Save channel units as attributes
+                if hasattr(pydas_obj, 'chInfo'):
+                    for i, ch_name in enumerate(pydas_obj.chInfo['Name']):
+                        ch_unit = pydas_obj.chInfo['Unit'].iloc[i]
+                        meta_group.attrs[f'channel_unit_{ch_name}'] = ch_unit
+            
+            # Add compression info
+            f.attrs['compression'] = str(compression)
+            f.attrs['compression_level'] = compression_opts
+            
+        # Export successful
+        file_size = os.path.getsize(filename) / (1024 * 1024)  # MB
+        logger.info(f"Successfully exported data to HDF5 file: {filename} (size: {file_size:.2f} MB)")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Export to HDF5 failed: {str(e)}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return False 
