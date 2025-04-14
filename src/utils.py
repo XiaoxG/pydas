@@ -429,6 +429,9 @@ def findtrans(unit, transDict, clear_cache=False):
     # Clear cache if requested
     if clear_cache:
         _global_trans_cache = {}
+        # If we're just clearing the cache and unit is empty or 'none', return a default value without warning
+        if not unit or unit.lower() == 'none':
+            return ['', np.array([1.0, 0.0, 0.0])]
     
     # Convert to lowercase and strip whitespace
     unit = unit.lower().strip()
@@ -474,7 +477,7 @@ def findtrans(unit, transDict, clear_cache=False):
         _global_trans_cache[unit] = trans
         return trans
     # Handle units with numeric suffix (e.g. m2)
-    elif unit[-1].isdigit():
+    elif unit and unit[-1].isdigit():
         n = int(unit[-1])
         unit_base = unit[0:-1]
         if unit_base in transDict:

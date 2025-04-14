@@ -148,6 +148,8 @@ from process import (
     add_diff1,
     add_diff2
 )
+from reporting import channel_report as _channel_report
+
 class PyDAS:
     """
     Python Data Analysis System for processing and analyzing time series data.
@@ -883,7 +885,8 @@ class PyDAS:
             transDict = get_default_transDict(g)
             
             # Clear global trans cache to ensure fresh calculation
-            findtrans('', transDict, clear_cache=True)
+            # 使用一个安全的字符串而不是空字符串
+            findtrans('none', transDict, clear_cache=True)
             
             # Preprocess: batch get all unit conversions
             unique_units = self.chInfo['Unit'].unique()
@@ -2574,72 +2577,105 @@ class PyDAS:
     def extreme_analysis(self, ch_name, sseg=0, visualization=True, bins=50, 
                       peak_prominence=1.0, peak_distance=None, 
                       visualization_backend='matplotlib', save_path=None, save_html=None,
-                      fullscale=False, lam=None, return_period_multipliers=[1, 5, 10], 
+                      fullscale=True, lam=None, return_period_multipliers=[1, 5, 10], 
                       peak_height=None, threshold=None, width=None, wlen=None, rel_height=0.5):
         """
-        对通道峰值进行极值统计分析。此方法调用analysis模块中的extreme_analysis函数。
+        Perform extreme value analysis on a channel.
+        This is a wrapper for the extreme_analysis function in the analysis module.
         
         Parameters:
         -----------
-        ch_name : str
-            要分析的通道名称
-        sseg : int, optional
-            要分析的数据段索引，默认为0
-        visualization : bool, optional
-            是否可视化结果，默认为True
-        bins : int, optional
-            直方图的箱数，默认为50
-        peak_prominence : float or tuple, optional
-            峰值的突出度要求，默认为1.0
-        peak_distance : int, optional
-            峰值之间的最小水平距离，默认为None
-        visualization_backend : str, optional
-            绘图后端 ('plotly' 或 'matplotlib')，默认为'matplotlib'
-        save_path : str, optional
-            图表保存路径，默认为None
-        save_html : str, optional
-            交互式HTML图表保存路径（仅适用于Plotly后端），默认为None
-        fullscale : bool, optional
-            是否转换为原型尺度，默认为False
-        lam : float, optional
-            尺度系数，仅在fullscale=True时使用，默认为None（使用对象的__lam__属性）
-        return_period_multipliers : list, optional
-            基于数据持续时间的回归期倍数，默认为[1, 5, 10]
-        peak_height : float or tuple, optional
-            峰值的高度要求，默认为None
-        threshold : float or tuple, optional
-            峰值的阈值要求，默认为None
-        width : float or tuple, optional
-            峰值的宽度要求，默认为None
-        wlen : int, optional
-            用于计算峰值突出度的窗口长度，默认为None
-        rel_height : float, optional
-            用于计算峰值宽度的相对高度，默认为0.5
-            
+        See documentation for analysis.extreme_analysis for details.
+        
         Returns:
         --------
         dict
-            包含极值分析结果的字典，包括：
-            - 'peaks_positive'：正峰值数组
-            - 'peaks_negative'：负峰值数组
-            - 'all_peaks'：所有峰值绝对值的数组
-            - 'extreme_value_model'：拟合的极值分布参数
-            - 'return_values'：不同回归期的回归值字典
-            - 'exceedance_probabilities'：超越概率表
-            - 'figure'：如果visualization=True，返回图表对象
-            
-        完整文档请参见analysis.extreme_analysis。
+            Dictionary containing analysis results
         """
-        
-        # 如果fullscale=True但未提供lam参数，使用对象的__lam__属性
-        if fullscale and lam is None:
+        # For full-scale analysis without specified lambda, use object default if available
+        if fullscale and lam is None and hasattr(self, '__lam__'):
             lam = self.__lam__
             
         return extreme_analysis(self, ch_name, sseg, visualization, bins, 
-                           peak_prominence, peak_distance, 
-                           visualization_backend, save_path, save_html,
-                           fullscale, lam, return_period_multipliers, 
-                           peak_height, threshold, width, wlen, rel_height)
+                                peak_prominence, peak_distance, 
+                                visualization_backend, save_path, save_html,
+                                fullscale, lam, return_period_multipliers,
+                                peak_height, threshold, width, wlen, rel_height)
+    
+    def channel_report(self, output_file='channel_report.xlsx', sseg=0, fullscale=True, 
+                      lam=None, rho=1.025, g=9.807, header_text=None, include_charts=True, 
+                      significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
+                      zerocrossing_analysis=True, amplitude_analysis=True, 
+                      n_hr_forecast=3):
+        """
+        为PyDAS对象的所有通道生成详细的Excel分析报告
+        
+        Parameters
+        ----------
+        output_file : str, default='channel_report.xlsx'
+            输出Excel文件的路径
+        sseg : int, default=0
+            要分析的数据段索引
+        fullscale : bool, default=True
+            是否使用实际尺度（原型尺度）值
+        lam : float, optional
+            尺度因子，仅在fullscale=True且PyDAS对象未设置__lam__属性时使用
+        rho : float, default=1.025
+            水密度 (kg/m³)，仅用于fullscale=True时
+        g : float, default=9.807
+            重力加速度 (m/s²)，仅用于fullscale=True时
+        header_text : str, optional
+            报告中的标题文本
+        include_charts : bool, default=True
+            是否在报告中包含图表
+        significant_percentile : float, default=33.0
+            计算显著值的百分位数
+        wave_analysis : bool, default=True
+            是否进行波浪分析
+        format_sheet : bool, default=True
+            是否设置Excel格式
+        zerocrossing_analysis : bool, default=True
+            是否进行过零分析
+        amplitude_analysis : bool, default=True
+            是否进行振幅分析
+        n_hr_forecast : int, default=3
+            极值估计的预测小时数
+            
+        Returns
+        -------
+        pandas.DataFrame
+            包含所有通道统计数据的DataFrame
+            
+        Notes
+        -----
+        - 生成一个包含所有通道统计分析的Excel报告
+        - 报告包括基本统计值、过零分析、振幅分析和极值估计
+        - 默认使用实际尺度值（原型尺度）
+        - 报告格式类似于标准海洋工程数据处理软件的输出
+        """
+        # 如果未提供lam但存在__lam__属性，使用对象的默认值
+        if fullscale and lam is None and hasattr(self, '__lam__'):
+            lam = self.__lam__
+            logger.info(f"Using object's default scale factor: λ = {lam}")
+        
+        # 调用reporting模块中的channel_report函数
+        return _channel_report(
+            pydas_obj=self,
+            output_file=output_file,
+            sseg=sseg,
+            fullscale=fullscale,
+            lam=lam,
+            rho=rho,
+            g=g,
+            header_text=header_text,
+            include_charts=include_charts,
+            significant_percentile=significant_percentile,
+            wave_analysis=wave_analysis,
+            format_sheet=format_sheet,
+            zerocrossing_analysis=zerocrossing_analysis,
+            amplitude_analysis=amplitude_analysis,
+            n_hr_forecast=n_hr_forecast
+        )
 
     def print_statistics(self, printTxt=False, printExcel=False):
         """
@@ -2983,7 +3019,7 @@ class PyDAS:
         new_chName : str
             新通道的名称
         unit : str, optional
-            新通道的单位。如果为None，将根据函数类型尝试推断
+            新通道的单位。默认为原通道单位（注意：某些运算会改变单位实际含义）
         sseg : int, list, or 'all', optional
             要处理的数据段，默认为0
             
@@ -2995,12 +3031,11 @@ class PyDAS:
         Notes:
         ------
         - 如果函数是字符串表达式，将使用eval进行计算，x代表通道数据
-        - 常见函数单位转换：
-          - 平方(x^2): 原单位²
-          - 开方(sqrt(x)): 原单位^(1/2)
-          - 对数(log(x)): 无单位
-          - 指数(exp(x)): 与x相关的单位
-        - 对于不安全的字符串表达式，将拒绝执行
+        - 注意：运算后的单位可能需要手动调整，例如:
+          - 平方运算: 单位应为原单位的平方
+          - 开方运算: 单位应为原单位的开方
+          - 对数运算: 通常无单位
+        - 默认保留原单位，需根据具体运算自行调整
         """
         import numpy as np
         import math
@@ -3019,6 +3054,11 @@ class PyDAS:
         ch_idx = self.chInfo.index[self.chInfo['Name'] == ch].tolist()[0]
         ch_unit = self.chInfo.loc[ch_idx, 'Unit']
         
+        # 如果未提供单位，默认使用原通道单位
+        if unit is None:
+            unit = ch_unit
+            logger.info(f"注意：使用原通道单位'{ch_unit}'作为新通道单位。根据运算类型，可能需要手动调整单位。")
+        
         # 确定要处理的数据段
         if sseg == 'all':
             segments = list(range(self.__segN__))
@@ -3036,145 +3076,64 @@ class PyDAS:
             logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
             return False
         
-        # 识别常见函数并推断单位（如果未提供）
-        func_name = None
-        if unit is None:
-            # 如果是字符串表达式，分析它来推断单位
-            if isinstance(func, str):
-                func_expr = func.lower().strip()
-                if any(x in func_expr for x in ['**2', 'square', 'x*x']):
-                    unit = f"{ch_unit}²" if ch_unit not in ['-', ''] else ch_unit
-                    func_name = "square"
-                elif any(x in func_expr for x in ['**3', 'cube', 'x**3']):
-                    unit = f"{ch_unit}³" if ch_unit not in ['-', ''] else ch_unit
-                    func_name = "cube"
-                elif any(x in func_expr for x in ['sqrt', 'x**0.5', 'x**(1/2)']):
-                    unit = f"{ch_unit}^(1/2)" if ch_unit not in ['-', ''] else ch_unit
-                    func_name = "square root"
-                elif any(x in func_expr for x in ['log', 'ln']):
-                    unit = '-'  # 对数无单位
-                    func_name = "logarithm"
-                elif any(x in func_expr for x in ['exp', 'e**']):
-                    unit = '-'  # 指数函数通常改变单位
-                    func_name = "exponential"
-                elif any(x in func_expr for x in ['sin', 'cos', 'tan']):
-                    unit = '-'  # 三角函数无单位
-                    func_name = "trigonometric"
-                elif any(x in func_expr for x in ['abs', 'fabs']):
-                    unit = ch_unit  # 绝对值保持单位不变
-                    func_name = "absolute"
-                else:
-                    unit = '-'  # 默认无法确定单位
-                    func_name = "custom"
-            else:
-                # 如果是可调用对象，尝试通过函数名称推断
-                func_str = str(func)
-                if 'square' in func_str or 'pow' in func_str:
-                    unit = f"{ch_unit}2" if ch_unit not in ['-', ''] else ch_unit
-                    func_name = "square"
-                elif 'cube' in func_str:
-                    unit = f"{ch_unit}3" if ch_unit not in ['-', ''] else ch_unit
-                    func_name = "cube"
-                elif 'sqrt' in func_str:
-                    unit = f"{ch_unit}^(1/2)" if ch_unit not in ['-', ''] else ch_unit
-                    func_name = "square root"
-                elif 'log' in func_str:
-                    unit = '-'
-                    func_name = "logarithm"
-                elif 'exp' in func_str:
-                    unit = '-'
-                    func_name = "exponential"
-                elif any(x in func_str for x in ['sin', 'cos', 'tan']):
-                    unit = '-'
-                    func_name = "trigonometric"
-                elif 'abs' in func_str:
-                    unit = ch_unit
-                    func_name = "absolute"
-                else:
-                    unit = '-'
-                    func_name = "custom"
-        
-        # 初始化成功标志
-        success = True
-        
-        # 处理第一个段并创建新通道
-        first_seg = segments[0]
-        
         try:
-            x = self.data[first_seg][ch].values
-            
-            # 应用函数
-            if callable(func):
-                # 直接调用函数
-                result = func(x)
-            elif isinstance(func, str):
+            # 准备处理函数
+            if isinstance(func, str):
                 # 检查字符串表达式安全性
                 unsafe_terms = ['import', 'eval', 'exec', 'compile', 'open', 'file', 
                               'os.', 'sys.', 'subprocess', 'shutil', '__']
                 if any(term in func for term in unsafe_terms):
                     logger.error(f"Unsafe expression detected: {func}")
                     return False
+                    
+                # 创建局部变量环境，用于安全执行
+                local_namespace = {"np": np, "math": math}
                 
-                # 使用eval执行字符串表达式
-                x_series = self.data[first_seg][ch]
+                # 定义安全的表达式处理函数
+                def safe_apply(x_series):
+                    local_vars = local_namespace.copy()
+                    local_vars['x'] = x_series
+                    return eval(func, {"__builtins__": {}}, local_vars)
                 
-                # 定义一个安全的本地命名空间
-                local_vars = {'x': x_series, 'np': np, 'math': math}
-                
-                try:
-                    result = eval(func, {"__builtins__": {}}, local_vars)
-                    # 如果结果是pandas.Series，转换为numpy数组
-                    if hasattr(result, 'values'):
-                        result = result.values
-                except Exception as e:
-                    logger.error(f"Error evaluating expression '{func}': {str(e)}")
-                    return False
+                apply_func = safe_apply
             else:
-                logger.error(f"Invalid function type: {type(func)}. Must be callable or string.")
-                return False
+                # 直接使用提供的函数
+                apply_func = func
             
-            # 添加新通道
-            self.add_channel(new_chName, unit, result, self.__fs__, 1.0, 0, first_seg)
-            
-            # 处理其他段（如果有）
-            for seg in segments[1:]:
-                if ch in self.data[seg].columns:
-                    x = self.data[seg][ch]
+            # 处理所有段 - 使用pandas的apply
+            for seg_idx, seg in enumerate(segments):
+                if ch not in self.data[seg].columns:
+                    logger.warning(f"Channel '{ch}' not found in segment {seg}, skipping.")
+                    continue
                     
-                    # 应用函数
-                    if callable(func):
-                        result = func(x)
-                    elif isinstance(func, str):
-                        local_vars = {'x': x, 'np': np, 'math': math}
-                        result = eval(func, {"__builtins__": {}}, local_vars)
-                        if hasattr(result, 'values'):
-                            result = result.values
-                    
-                    # 添加数据到新通道
+                # 应用函数
+                result = self.data[seg][ch].apply(apply_func)
+                
+                # 对第一个段，创建新通道
+                if seg_idx == 0:
+                    self.add_channel(new_chName, unit, result.values, self.__fs__, 1.0, 0, seg)
+                else:
+                    # 对其他段，添加数据到通道
                     self.data[seg][new_chName] = result
                     
-                    # 更新统计信息
-                    self.segStatis[seg].loc[new_chName] = [
-                        np.mean(result), 
-                        np.std(result),
-                        np.amax(result), 
-                        np.amin(result), 
-                        unit
-                    ]
+                # 更新统计信息 - 直接使用pandas的统计方法
+                self.segStatis[seg].loc[new_chName] = [
+                    result.mean(), 
+                    result.std(),
+                    result.max(), 
+                    result.min(), 
+                    unit
+                ]
+            
+            logger.info(f"成功创建新通道 '{new_chName}'，应用函数到 '{ch}'")
+            return True
+            
         except Exception as e:
             logger.error(f"Error applying function to channel: {str(e)}")
             # 如果已经创建了通道，尝试删除它
             if new_chName in self.chInfo['Name'].values:
                 self.delete_channel(new_chName)
-            success = False
-        
-        if success:
-            if func_name:
-                logger.info(f"Created new channel '{new_chName}' by applying {func_name} function to '{ch}'")
-            else:
-                logger.info(f"Created new channel '{new_chName}' by applying custom function to '{ch}'")
-        
-        return success
+            return False
 
     def _findtrans(self, unit, transDict):
         """

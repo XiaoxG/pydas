@@ -29,7 +29,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.19.0",
-    "pandas>=1.1.0",
+    "pandas>=2.0.0",
     "scipy>=1.13.0",
     "matplotlib>=3.3.0",
     "plotly>=5.0.0",
@@ -42,6 +42,9 @@ dependencies = [
     "nbformat>=4.2.0",
     "seaborn>=0.12.0",
     "h5py>=3.0.0",
+    "openpyxl>=3.0.7",
+    "xlsxwriter>=1.4.0",
+    "pyarrow>=8.0.0",
 ]
 
 [project.urls]
