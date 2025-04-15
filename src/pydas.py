@@ -2290,7 +2290,7 @@ class PyDAS:
               datashade=False, contour_levels=20, sampling_algorithm='lttb',
               memory_efficient=True, bin_size=None, sns_style=None,
               sns_bins=50, sns_pthresh=0.1, sns_cmap=None,
-              sns_contour_levels=5, sns_contour_color=None, sns_linewidths=None):
+              sns_contour_levels=5, sns_contour_color=None, sns_linewidths=None, equal_aspect=True,square_plot=True):
         """
         Create an XY scatter plot with one channel on the X-axis and another on the Y-axis.
         
@@ -2400,7 +2400,9 @@ class PyDAS:
                 sns_cmap=sns_cmap,
                 sns_contour_levels=sns_contour_levels,
                 sns_contour_color=sns_contour_color,
-                sns_linewidths=sns_linewidths
+                sns_linewidths=sns_linewidths,
+                equal_aspect=equal_aspect,
+                square_plot=square_plot
             )
         except ImportError as e:
             logger.error(f"Plot module not found: {str(e)}")

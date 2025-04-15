@@ -885,14 +885,22 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     template=PLOT_CONFIG['style']['plotly'].get(style, PLOT_CONFIG['style']['plotly']['default']),
                     width=width,
                     height=height,
-                    grid=dict(rows=1, columns=1, pattern="independent"),
-                    margin=dict(l=50, r=50, t=50, b=50),
+                    showlegend=True,
                     font=dict(
                         family=PLOT_CONFIG['font']['family'],
                         size=PLOT_CONFIG['font']['size']['medium']
                     ),
                     # 优化性能设置
                     uirevision='constant'  # 维持缩放级别
+                )
+                
+                # Set equal aspect ratio if requested
+                if equal_aspect:
+                    fig.update_layout(
+                        yaxis=dict(
+                            scaleanchor="x",
+                            scaleratio=1,
+                        )
                 )
                 
                 # Update axes
@@ -1057,6 +1065,10 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 
                 # Set grid
                 ax.grid(grid)
+                
+                # Set equal aspect ratio if requested
+                if equal_aspect:
+                    ax.set_aspect('equal')
                 
                 # Set axis limits if provided
                 if xlim is not None:
@@ -1519,63 +1531,116 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
          memory_efficient=True, bin_size=None, sns_style=None, 
          sns_bins=50, sns_pthresh=0.1, sns_cmap=None,
          sns_contour_levels=5, sns_contour_color=None, sns_linewidths=None,
-         use_resampler=False, n_shown_samples=5000):
+         use_resampler=False, n_shown_samples=5000, equal_aspect=True, square_plot=True):
     """
-    Create an XY scatter plot with one channel on the X-axis and another on the Y-axis.
+    Create a scatter plot of two channels.
     
     Parameters:
-        pydas_obj (PyDAS): The PyDAS object containing channel data
-        x_ch_name (str): Channel name for the X-axis
-        y_ch_name (str): Channel name for the Y-axis
-        sseg (int): Segment index to plot (default: 0)
-        title (str): Plot title (default: None, auto-generated)
-        xlabel (str): X-axis label (default: None, auto-generated)
-        ylabel (str): Y-axis label (default: None, auto-generated)
-        xlim (tuple): X-axis limits as (min, max) (default: None)
-        ylim (tuple): Y-axis limits as (min, max) (default: None)
-        grid (bool): Whether to show grid (default: True)
-        show (bool): Whether to display the plot (default: True)
-        save_path (str): Path to save the plot (default: None)
-        plotbackend (str): Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
-        style (str): Plot style to use (default: None, uses backend's default style)
-        save_html (str): Path to save as interactive HTML (default: None)
-        dpi (int): DPI for saved image (default: None, uses CONFIG default)
-        width (int): Width in pixels for plot (default: None)
-        height (int): Height in pixels for plot (default: None)
-        color (str): Color for scatter points (default: None, auto-generated)
-        alpha (float): Transparency for scatter points (default: None, uses CONFIG default)
-        marker_size (float): Size of scatter points (default: None, uses CONFIG default)
-        figsize (tuple): Figure size in inches (default: None, uses CONFIG default)
-        line (bool): Connect points with lines (default: False)
-        fit_line (bool): Show linear regression fit line (default: False)
-        fit_color (str): Color for fit line (default: None, uses CONFIG default)
-        fit_line_width (float): Width of fit line (default: None, uses CONFIG default)
-        fit_alpha (float): Transparency of fit line (default: None, uses CONFIG default)
-        show_stats (bool): Show statistical information on the plot (default: False)
-        downsampling (bool): Apply downsampling for large datasets (default: True)
-        max_points (int): Maximum number of points to show before downsampling (default: 10000)
-        density_plot (bool): Show density contour plot for large datasets (default: False)
-        density_colorscale (str): Colorscale for density plot (default: None, uses CONFIG default)
-        density_opacity (float): Opacity for density contours (default: None, uses CONFIG default)
-        use_webgl (bool): Use WebGL rendering for better performance (default: True)
-        adaptive_sampling (bool): Use adaptive sampling to preserve signal features (default: False)
-        datashade (bool): Use datashading for very large datasets (default: False)
-        contour_levels (int): Number of contour levels for density plot (default: 20)
-        sampling_algorithm (str): Algorithm for downsampling ('lttb', 'uniform', 'peak') (default: 'lttb')
-        memory_efficient (bool): Use memory-efficient methods for very large datasets (default: True)
-        bin_size (tuple): Bin size for 2D histogram (x_bins, y_bins) (default: None, auto)
-        sns_style (str): Seaborn style theme (default: None, uses CONFIG default)
-        sns_bins (int): Number of bins for Seaborn histplot (default: 50)
-        sns_pthresh (float): Threshold for Seaborn histplot (default: 0.1)
-        sns_cmap (str): Colormap for Seaborn histplot (default: None, uses CONFIG default)
-        sns_contour_levels (int): Number of levels for Seaborn kdeplot (default: 5)
-        sns_contour_color (str): Color of contour lines for Seaborn kdeplot (default: None, uses CONFIG default)
-        sns_linewidths (float): Line width for Seaborn kdeplot (default: None, uses CONFIG default)
-        use_resampler (bool): Use plotly-resampler for dynamic downsampling (default: False)
-        n_shown_samples (int): Number of samples to show initially (default: 5000)
+    -----------
+    pydas_obj : PyDAS object
+        PyDAS object
+    x_ch_name : str
+        Channel name for x-axis
+    y_ch_name : str
+        Channel name for y-axis
+    sseg : int, optional
+        Segment index, default is 0
+    title : str, optional
+        Plot title
+    xlabel, ylabel : str, optional
+        Axis labels
+    xlim, ylim : tuple, optional
+        Axis limits as (min, max)
+    grid : bool, optional
+        Whether to show grid
+    show : bool, optional
+        Whether to show plot
+    save_path : str, optional
+        Path to save plot
+    plotbackend : str, optional
+        Plotting backend ('matplotlib', 'plotly', 'seaborn', 'datashader')
+    style : str, optional
+        Plot style
+    save_html : str, optional
+        Path to save interactive HTML (Plotly only)
+    dpi : int, optional
+        DPI for saved plot
+    width, height : int, optional
+        Width and height of plot in pixels
+    color : str or tuple, optional
+        Color for markers
+    alpha : float, optional
+        Transparency of markers (0-1)
+    marker_size : float, optional
+        Size of markers
+    figsize : tuple, optional
+        Figure size as (width, height) in inches
+    line : bool, optional
+        Whether to connect points with a line
+    fit_line : bool, optional
+        Whether to add a linear regression line
+    fit_color : str, optional
+        Color for regression line
+    fit_line_width : float, optional
+        Line width for regression line
+    fit_alpha : float, optional
+        Transparency for regression line
+    show_stats : bool, optional
+        Whether to show statistics on plot
+    downsampling : bool, optional
+        Whether to downsample large datasets
+    max_points : int, optional
+        Maximum number of points to display
+    density_plot : bool, optional
+        Whether to create a density plot
+    density_colorscale : str, optional
+        Colorscale for density plot
+    density_opacity : float, optional
+        Opacity for density plot
+    use_webgl : bool, optional
+        Whether to use WebGL for better performance (Plotly only)
+    adaptive_sampling : bool, optional
+        Whether to use adaptive sampling for large datasets
+    datashade : bool, optional
+        Whether to use datashading for large datasets
+    contour_levels : int, optional
+        Number of contour levels for density plot
+    sampling_algorithm : str, optional
+        Algorithm for data downsampling ('lttb', 'minmax', 'uniform')
+    memory_efficient : bool, optional
+        Whether to optimize for memory usage
+    bin_size : int or tuple, optional
+        Bin size for density plot
+    sns_style : str, optional
+        Seaborn style
+    sns_bins : int, optional
+        Number of bins for seaborn KDE
+    sns_pthresh : float, optional
+        Threshold for seaborn contour plot
+    sns_cmap : str, optional
+        Colormap for seaborn plot
+    sns_contour_levels : int, optional
+        Number of contour levels for seaborn
+    sns_contour_color : str, optional
+        Color for seaborn contour lines
+    sns_linewidths : float, optional
+        Line width for seaborn contour lines
+    use_resampler : bool, optional
+        Whether to use plotly-resampler
+    n_shown_samples : int, optional
+        Number of samples to show with resampler
+    equal_aspect : bool, optional
+        Whether to keep x and y axes with equal scale (1:1 aspect ratio), ensuring that 
+        equal distances in data space are visually equal in both directions. This is 
+        important for accurate representation of physical quantities. Default is True.
+    square_plot : bool, optional
+        Whether to ensure plot is square by adjusting axis limits based on the larger range. 
+        Only applies when equal_aspect is True. Default is True.
         
     Returns:
-        tuple: (pandas.DataFrame with x and y data, figure object)
+    --------
+    object
+        matplotlib.figure.Figure or plotly.graph_objects.Figure or None
     """
     # 使用配置默认值（如果未指定）
     if dpi is None:
@@ -1635,6 +1700,40 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
         
         # Create a DataFrame for the data
         df = pd.DataFrame({x_ch_name: x_data, y_ch_name: y_data})
+        
+        # Calculate axis limits for square plot if requested
+        if equal_aspect and square_plot and xlim is None and ylim is None:
+            x_min, x_max = df[x_ch_name].min(), df[x_ch_name].max()
+            y_min, y_max = df[y_ch_name].min(), df[y_ch_name].max()
+            
+            # Add 5% padding to the ranges
+            x_range = x_max - x_min
+            y_range = y_max - y_min
+            x_pad = 0.05 * x_range
+            y_pad = 0.05 * y_range
+            
+            # Calculate padded bounds
+            x_min_padded = x_min - x_pad
+            x_max_padded = x_max + x_pad
+            y_min_padded = y_min - y_pad
+            y_max_padded = y_max + y_pad
+            
+            # Recalculate ranges with padding
+            x_range_padded = x_max_padded - x_min_padded
+            y_range_padded = y_max_padded - y_min_padded
+            
+            # Find the maximum range to create a square plot
+            max_range = max(x_range_padded, y_range_padded)
+            
+            # Calculate centers
+            x_center = (x_min_padded + x_max_padded) / 2
+            y_center = (y_min_padded + y_max_padded) / 2
+            
+            # Set square limits based on max range
+            xlim = (x_center - max_range/2, x_center + max_range/2)
+            ylim = (y_center - max_range/2, y_center + max_range/2)
+            
+            logger.info(f"Setting square axis limits: xlim={xlim}, ylim={ylim}")
         
         # Apply downsampling if needed and enabled
         if downsampling and len(df) > max_points:
@@ -1798,6 +1897,10 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                 
                 # Set grid
                 ax.grid(grid)
+                
+                # Set equal aspect ratio if requested
+                if equal_aspect:
+                    ax.set_aspect('equal')
                 
                 # Set axis limits if provided
                 if xlim is not None:
@@ -2084,6 +2187,15 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                     uirevision='constant'  # 维持缩放级别
                 )
                 
+                # Set equal aspect ratio if requested
+                if equal_aspect:
+                    fig.update_layout(
+                        yaxis=dict(
+                            scaleanchor="x",
+                            scaleratio=1,
+                        )
+                )
+                
                 # Update axes
                 fig.update_xaxes(showgrid=grid, zeroline=grid)
                 fig.update_yaxes(showgrid=grid, zeroline=grid)
@@ -2252,6 +2364,10 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                 
                 # Set grid
                 ax.grid(grid)
+                
+                # Set equal aspect ratio if requested
+                if equal_aspect:
+                    ax.set_aspect('equal')
                 
                 # Set axis limits if provided
                 if xlim is not None:
@@ -3069,6 +3185,15 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                         family=PLOT_CONFIG['font']['family'],
                         size=PLOT_CONFIG['font']['size']['medium']
                     ),
+                )
+                
+                # Set equal aspect ratio if requested
+                if equal_aspect:
+                    fig.update_layout(
+                        yaxis=dict(
+                            scaleanchor="x",
+                            scaleratio=1,
+                        )
                 )
                 
                 # Update axes
