@@ -131,6 +131,81 @@ Logging functionality for the PyDAS system:
 - `setup_logger(level)`: Configure the logger
 - `get_logger(name)`: Get a named logger
 
+### Reporting Module (reporting.py)
+
+| Function | Description |
+|----------|-------------|
+| `analyze_channel_data(data_scaled, mean_val, std_val, ...)` | Analyze channel data and return statistical results |
+| `channel_report(pydas_obj, output_file, sseg, fullscale, ...)` | Generate detailed Excel analysis report for all channels |
+
+### Reporting Examples
+
+```python
+# 基本统计分析报告
+results = data.channel_report(
+    output_file='basic_analysis.xlsx',
+    header_text='Basic Analysis Report'
+)
+
+# 全尺度分析报告
+results = data.channel_report(
+    output_file='fullscale_analysis.xlsx',
+    fullscale=True,
+    lam=36,  # 尺度因子
+    rho=1.025,  # 水密度
+    g=9.807,  # 重力加速度
+    header_text='Full Scale Analysis Report'
+)
+
+# 波浪分析报告（包含高低频分离）
+results = data.channel_report(
+    output_file='wave_analysis.xlsx',
+    header_text='Wave Analysis Report',
+    cutoffperiod=15.0,  # 高低频分离的截止周期（秒）
+    significant_percentile=33.0,  # 显著值的百分位数
+    wave_analysis=True,
+    zerocrossing_analysis=True,
+    amplitude_analysis=True,
+    n_hr_forecast=3  # 3小时极值预测
+)
+
+# 自定义分析报告
+results = data.channel_report(
+    output_file='custom_analysis.xlsx',
+    header_text='Custom Analysis Report',
+    include_charts=False,  # 不包含图表
+    format_sheet=True,  # 格式化Excel表格
+    significant_percentile=33.0,  # 显著值的百分位数
+    wave_analysis=True,  # 进行波浪分析
+    zerocrossing_analysis=True,  # 进行过零分析
+    amplitude_analysis=True,  # 进行振幅分析
+    n_hr_forecast=3,  # 3小时极值预测
+    cutoffperiod=20.0  # 高低频分离的截止周期
+)
+
+# 分析结果处理
+if results:
+    # 获取总统计结果
+    total_stats = results[0]  # 总统计结果DataFrame
+    low_freq_stats = results[1]  # 低频统计结果DataFrame
+    high_freq_stats = results[2]  # 高频统计结果DataFrame
+    
+    # 打印特定通道的统计信息
+    channel_name = "wave_height"
+    channel_stats = total_stats[total_stats['Name'] == channel_name]
+    if not channel_stats.empty:
+        print(f"\n{channel_name} 统计信息:")
+        print(f"最大值: {channel_stats['maximum'].values[0]:.3f}")
+        print(f"最小值: {channel_stats['minimum'].values[0]:.3f}")
+        print(f"平均值: {channel_stats['mean'].values[0]:.3f}")
+        print(f"标准差: {channel_stats['STD'].values[0]:.3f}")
+        print(f"显著双振幅: {channel_stats['sign.\ndouble\namplitude'].values[0]:.3f}")
+        print(f"零上穿数: {channel_stats['number\nof zero\nupcross'].values[0]}")
+        print(f"平均零上穿周期: {channel_stats['mean\nzerocro.\nperiod'].values[0]:.3f}")
+        print(f"预估3小时最大值: {channel_stats['estimated\n3hr\nmaximum'].values[0]:.3f}")
+        print(f"预估3小时最小值: {channel_stats['estimated\n3hr\nminimum'].values[0]:.3f}")
+```
+
 ## Features
 
 - **Data Processing & Analysis**
@@ -509,6 +584,13 @@ PyDAS is distributed under the MIT License. See the LICENSE file for more inform
 |----------|-------------|
 | `setup_logger(level)` | Configure the logger for the PyDAS system |
 | `get_logger(name)` | Get a named logger instance |
+
+### Reporting Module (reporting.py)
+
+| Function | Description |
+|----------|-------------|
+| `analyze_channel_data(data_scaled, mean_val, std_val, ...)` | Analyze channel data and return statistical results |
+| `channel_report(pydas_obj, output_file, sseg, fullscale, ...)` | Generate detailed Excel analysis report for all channels |
 
 ## Citation
 

@@ -2606,7 +2606,7 @@ class PyDAS:
                       lam=None, rho=1.025, g=9.807, header_text=None, include_charts=True, 
                       significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
                       zerocrossing_analysis=True, amplitude_analysis=True, 
-                      n_hr_forecast=3):
+                      n_hr_forecast=3, cutoffperiod=15.0):
         """
         为PyDAS对象的所有通道生成详细的Excel分析报告
         
@@ -2640,6 +2640,8 @@ class PyDAS:
             是否进行振幅分析
         n_hr_forecast : int, default=3
             极值估计的预测小时数
+        cutoffperiod : float, default=15.0
+            高低频分离的截止周期（秒），用于分离高频和低频成分
             
         Returns
         -------
@@ -2674,7 +2676,8 @@ class PyDAS:
             format_sheet=format_sheet,
             zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis,
-            n_hr_forecast=n_hr_forecast
+            n_hr_forecast=n_hr_forecast,
+            cutoffperiod=cutoffperiod
         )
 
     def print_statistics(self, printTxt=False, printExcel=False):
