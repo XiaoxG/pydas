@@ -493,7 +493,7 @@ def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization
     
     # 输出统计结果
     scale_info = "原型尺度" if fullscale else "模型尺度"
-    logger.info(f"统计分析结果 ({scale_info}):")
+    logger.info(f"Statistical analysis results ({scale_info}):")
     logger.info("\n" + stats_df.to_string(float_format=lambda x: f"% .4E" % x))
     
     return None 

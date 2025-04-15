@@ -20,6 +20,10 @@ import scipy.signal as signal
 import copy
 from scipy import stats as spstats
 from openpyxl.worksheet.page import PageMargins, PrintPageSetup
+import matplotlib.pyplot as plt
+from waveModel.specmodels import Jonswap
+import matplotlib.gridspec as gridspec
+from scipy.stats import norm
 
 # Set up logging
 logger = logging.getLogger('pydas.reporting')
@@ -524,3 +528,168 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
     
     # 返回所有结果DataFrame
     return results_total, results_low, results_high 
+
+def wave_report(pydas_obj, ch_name, sseg=0, save_path=None, title=None, L=1024,
+                Hs=None, Tp=None, gamma=None, bins=50, fullscale=False, lam=None, 
+                rho=1.025, g=9.807):
+    """
+    生成波浪分析报告，包括时间序列、谱分析和峰值统计
+    
+    Parameters
+    ----------
+    pydas_obj : PyDAS object
+        PyDAS对象
+    ch_name : str
+        要分析的通道名称
+    sseg : int, optional
+        数据段索引，默认为0
+    save_path : str, optional
+        保存图片的路径，默认为None
+    title : str, optional
+        图表标题，默认为None
+    L : int, optional
+        谱分析的数据块长度，默认为1024
+    Hs : float, optional
+        JONSWAP谱的有效波高，默认为None
+    Tp : float, optional
+        JONSWAP谱的峰值周期，默认为None
+    gamma : float, optional
+        JONSWAP谱的峰值增强因子，默认为None
+    bins : int, optional
+        直方图的bin数量，默认为50
+    fullscale : bool, optional
+        是否使用实际尺度数据，默认为False
+    lam : float, optional
+        尺度因子，默认为None
+    rho : float, optional
+        水密度 (kg/m3)，默认为1.025
+    g : float, optional
+        重力加速度 (m/s2)，默认为9.807
+        
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        生成的图表对象
+    """
+    # 检查通道是否存在
+    if ch_name not in pydas_obj.data[sseg]:
+        raise ValueError(f"Channel {ch_name} not found in segment {sseg}")
+    
+    # 获取数据
+    data = pydas_obj.data[sseg][ch_name].values
+    unit = 'cm'
+    T = np.arange(len(data)) / pydas_obj.__fs__
+
+    # 如果需要转换为实际尺度
+    if fullscale:
+        if lam is None:
+            lam = pydas_obj.__lam__
+        ts = pydas_obj.channel2fullscale(ch_name, lam, rho, g)
+        data = ts.data
+        T = ts.args
+        unit = 'm'  # 更新单位
+    
+    # 创建图表
+    fig = plt.figure(figsize=(10, 11))
+    gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 1])
+    
+    # 1. 时间序列图（第一行，全宽）
+    ax1 = fig.add_subplot(gs[0, :])
+    ax1.plot(T/3600, data)
+    ax1.set_xlabel('Time (hr)')
+    ax1.set_ylabel(f'Amplitude ({unit})')
+    ax1.grid(True, axis='x')
+    ax1.set_title('Time Series')
+    ax1.set_xlim(T[0]/3600, T[-1]/3600)
+    if title:
+        fig.suptitle(title, y=0.95)
+    
+    # 2. 谱分析（第二行，左）
+    ax2 = fig.add_subplot(gs[1, 0])
+    spec = pydas_obj.spectral_analysis(ch_name, method='cov', L=L, plot=False, 
+                                     fullscale=fullscale, lam=lam, rho=rho, g=g)
+    
+    # 获取谱数据
+    freq = spec.args
+    psd = spec.data
+    
+    # 绘制测量谱
+    ax2.plot(freq, psd, label='Measured')
+    
+    # 如果提供了JONSWAP参数，绘制理论谱
+    if Hs is not None and Tp is not None:
+        from waveModel.specmodels import Jonswap
+        jonswap_spec = Jonswap(Hs, Tp, gamma=gamma if gamma is not None else 3.3)
+        ax2.plot(jonswap_spec.args, jonswap_spec.data, 'r--', label='JONSWAP')
+
+    ax2.set_xlim(0, 2)
+    ax2.set_ylim(bottom=0)
+    ax2.set_xlabel('Frequency (rad/s)')
+    ax2.set_ylabel(f'PSD ({unit}$^2$ s/rad)')
+    # ax2.set_yscale('log')
+    ax2.legend()
+    ax2.grid(True)
+    ax2.set_title('Wave Spectrum')
+    
+    # 计算并显示谱特征
+    m0 = np.trapz(psd, freq)  # 使用数值积分计算零阶矩
+    Hm0 = 4.0 * np.sqrt(m0)
+    text = f'Hm0 = {Hm0:.2f} {unit}'
+    ax2.text(0.05, 0.95, text, transform=ax2.transAxes, verticalalignment='top')
+    
+    # 3. 直方图和正态拟合（第二行，右）
+    ax3 = fig.add_subplot(gs[1, 1])
+    n, bins, patches = ax3.hist(data, bins=bins, density=True, alpha=0.6)
+    
+    # 拟合正态分布
+    mu, std = np.mean(data), np.std(data)
+    x = np.linspace(min(data), max(data), 100)
+    p = norm.pdf(x, mu, std)
+    ax3.plot(x, p, 'r-', linewidth=2, label=f'Normal (μ={mu:.2f}, σ={std:.2f})')
+    
+    ax3.set_xlabel(f'Amplitude ({unit})')
+    ax3.set_ylabel('Probability Density')
+    ax3.grid(True)
+    ax3.set_title('Amplitude Distribution')
+    ax3.legend()
+    
+    # 4. 峰值统计（第三行）
+    # 检测峰值
+    peaks, _ = signal.find_peaks(data, prominence=1.0)
+    peak_values = data[peaks]
+    
+    # 峰值直方图（第三行，左）
+    ax4 = fig.add_subplot(gs[2, 0])
+    n_peaks, bins_peaks, patches_peaks = ax4.hist(peak_values, bins=bins, density=True, alpha=0.6)
+    
+    # 拟合Weibull分布
+    shape, loc, scale = spstats.weibull_min.fit(peak_values, floc=0)
+    x_peaks = np.linspace(0, max(peak_values), 100)
+    p_peaks = spstats.weibull_min.pdf(x_peaks, shape, loc, scale)
+    ax4.plot(x_peaks, p_peaks, 'r-', linewidth=2, 
+             label=f'Weibull (k={shape:.2f}, λ={scale:.2f})')
+    
+    ax4.set_xlabel(f'Peak Amplitude ({unit})')
+    ax4.set_ylabel('Probability Density')
+    ax4.grid(True)
+    ax4.set_title('Peak Distribution')
+    ax4.set_xlim(left=0)
+    ax4.legend()
+    
+    # 显示峰值统计
+    text = f'Peak Count: {len(peaks)}\nMean: {np.mean(peak_values):.2f}\nMax: {max(peak_values):.2f}\nMin: {min(peak_values):.2f}'
+    ax4.text(0.05, 0.95, text, transform=ax4.transAxes, verticalalignment='top')
+    
+    # Q-Q图（第三行，右）
+    ax5 = fig.add_subplot(gs[2, 1])
+    spstats.probplot(peak_values, dist="norm", plot=ax5)
+    ax5.set_title('Q-Q Plot of Peaks')
+    ax5.grid(True)
+    
+    plt.tight_layout()
+    
+    # 保存图片
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    return fig

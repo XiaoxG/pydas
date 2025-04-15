@@ -3181,3 +3181,45 @@ class PyDAS:
         New code should use utils.get_default_transDict directly.
         """
         return get_default_transDict(g)
+
+    def wave_report(self, ch_name, sseg=0, save_path=None, title=None, L=1024,
+                  Hs=None, Tp=None, gamma=None, bins=50, fullscale=True, lam=None, 
+                  rho=1.025, g=9.807):
+        """
+        生成波浪分析报告，包括时间序列、谱分析和峰值统计
+        
+        Parameters
+        ----------
+        ch_name : str
+            要分析的通道名称
+        sseg : int, optional
+            数据段索引，默认为0
+        save_path : str, optional
+            保存图片的路径，默认为None
+        title : str, optional
+            图表标题，默认为None
+        Hs : float, optional
+            JONSWAP谱的有效波高，默认为None
+        Tp : float, optional
+            JONSWAP谱的峰值周期，默认为None
+        gamma : float, optional
+            JONSWAP谱的峰值增强因子，默认为None
+        bins : int, optional
+            直方图的bin数量，默认为50
+        fullscale : bool, optional
+            是否使用实际尺度数据，默认为False
+        lam : float, optional
+            尺度因子，默认为None
+        rho : float, optional
+            水密度 (kg/m3)，默认为1.025
+        g : float, optional
+            重力加速度 (m/s2)，默认为9.807
+            
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            生成的图表对象
+        """
+        from reporting import wave_report
+        return wave_report(self, ch_name, sseg, save_path, title, 
+                         L, Hs, Tp, gamma, bins, fullscale, lam, rho, g)

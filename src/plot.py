@@ -2429,6 +2429,10 @@ def _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, sa
         if data is None:
             data = pydas_obj.data[sseg][name].values
             
+        # Calculate time axis in seconds
+        dt = 1.0 / pydas_obj.__fs__  # Time step in seconds
+        time_axis = np.arange(0, len(data) * dt, dt)
+            
         # Detect peaks (calculate before plotting to mark in time series)
         data_abs = np.abs(data)  # Consider both positive and negative peaks
         peaks, _ = signal.find_peaks(data_abs, height=np.mean(data_abs) + 0.5 * np.std(data_abs))
@@ -2439,15 +2443,18 @@ def _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, sa
             peaks, _ = signal.find_peaks(data_abs, height=np.mean(data_abs))
             peak_values = data_abs[peaks]
         
+        # Get channel unit
+        unit = stats_df.loc[name, 'Unit']
+        
         # 1. Time series plot (full width)
         ax1 = plt.subplot(gs[0, :])  # Span the first row with two columns
-        ax1.plot(data)
+        ax1.plot(time_axis, data)
         # Mark peak positions in time series
         if len(peaks) > 0:
-            ax1.plot(peaks, data[peaks], 'ro', markersize=3, alpha=0.6)
+            ax1.plot(time_axis[peaks], data[peaks], 'ro', markersize=3, alpha=0.6)
         ax1.set_title('Time Series')
-        ax1.set_xlabel('Sample')
-        ax1.set_ylabel(f'{name} [{stats_df.loc[name, "Unit"]}]')
+        ax1.set_xlabel('Time (s)')
+        ax1.set_ylabel(f'{name} [{unit}]')
         ax1.grid(True)
         
         # 2. Histogram and PDF (second row, left)
@@ -2465,7 +2472,7 @@ def _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, sa
         ax2.plot(x, pdf, 'r-', lw=2, label=f'Normal PDF\n(μ={mu:.2E}, σ={sigma:.2E})')
         
         ax2.set_title('Histogram and PDF')
-        ax2.set_xlabel(f'{name} [{stats_df.loc[name, "Unit"]}]')
+        ax2.set_xlabel(f'{name} [{unit}]')
         ax2.set_ylabel('Density')
         ax2.legend()
         ax2.grid(True)
@@ -2482,7 +2489,7 @@ def _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, sa
         ax3.plot(x, cdf, 'r-', lw=2, label='Normal CDF')
         
         ax3.set_title('Empirical CDF')
-        ax3.set_xlabel(f'{name} [{stats_df.loc[name, "Unit"]}]')
+        ax3.set_xlabel(f'{name} [{unit}]')
         ax3.set_ylabel('Probability')
         ax3.grid(True)
         ax3.legend()
@@ -2518,7 +2525,7 @@ def _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, sa
                 pass
             
             ax5.set_title('Peak Value PDF')
-            ax5.set_xlabel(f'Peak Magnitude [{stats_df.loc[name, "Unit"]}]')
+            ax5.set_xlabel(f'Peak Magnitude [{unit}]')
             ax5.set_ylabel('Density')
             ax5.legend()
             ax5.grid(True)
@@ -2586,6 +2593,10 @@ def _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig,
             data_length = len(data)
             downsample = data_length > max_points
             
+            # Calculate time axis in seconds
+            dt = 1.0 / pydas_obj.__fs__  # Time step in seconds
+            time_axis = np.arange(0, data_length * dt, dt)
+            
             if downsample:
                 logger.info(f"Downsampling data from {data_length} to {max_points} points for plotting")
                 # Calculate downsample step
@@ -2593,11 +2604,11 @@ def _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig,
                 # Basic uniform downsampling for visualization
                 indices = np.arange(0, data_length, step)
                 plot_data = data[indices]
-                plot_indices = indices
+                plot_time = time_axis[indices]
             else:
                 # Use original data
                 plot_data = data
-                plot_indices = np.arange(data_length)
+                plot_time = time_axis
                 
             # Detect peaks
             data_abs = np.abs(data)  # Consider both positive and negative peaks
@@ -2615,7 +2626,7 @@ def _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig,
             # 1. Time series plot (full width)
             fig.add_trace(
                 scatter_type(
-                    x=plot_indices,
+                    x=plot_time,
                     y=plot_data,
                     mode='lines',
                     name='Time Series'
@@ -2628,20 +2639,20 @@ def _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig,
                 # If data was downsampled, we need to filter peaks to only show those in the plot
                 if downsample:
                     # Find peaks that are included in the downsampled indices
-                    mask = np.isin(peaks, plot_indices)
+                    mask = np.isin(peaks, indices)
                     visible_peaks = peaks[mask] if any(mask) else []
                     visible_peak_values = data[visible_peaks] if len(visible_peaks) > 0 else []
                     
-                    peak_indices = visible_peaks
+                    peak_times = time_axis[visible_peaks]
                     peak_data = visible_peak_values
                 else:
-                    peak_indices = peaks
+                    peak_times = time_axis[peaks]
                     peak_data = data[peaks]
                 
-                if len(peak_indices) > 0:
+                if len(peak_times) > 0:
                     fig.add_trace(
                         scatter_type(
-                            x=peak_indices,
+                            x=peak_times,
                             y=peak_data,
                             mode='markers',
                             name='Peaks',
@@ -2651,278 +2662,137 @@ def _plot_statistics_plotly(pydas_obj, ch_names, sseg, stats_df, bins, save_fig,
                         row=1, col=1
                     )
             
-            # Add statistics annotation
-            stats_text = (f"Mean: {stats_df.loc[name, 'Mean']:.4E}<br>"
-                         f"Std: {stats_df.loc[name, 'Std']:.4E}<br>"
-                         f"RMS: {stats_df.loc[name, 'RMS']:.4E}<br>"
-                         f"Range: {stats_df.loc[name, 'Range']:.4E}")
+            # Update x-axis label for time series
+            fig.update_xaxes(title_text="Time (s)", row=1, col=1)
             
-            fig.add_annotation(
-                xref="x domain", yref="y domain",
-                x=0.05, y=0.95,
-                text=stats_text,
-                showarrow=False,
-                bgcolor="rgba(255, 255, 255, 0.8)",
-                bordercolor="rgba(0, 0, 0, 0.3)",
-                borderwidth=1,
-                borderpad=4,
-                font=dict(size=10),
-                row=1, col=1
+            # Update y-axis label with unit
+            unit = stats_df.loc[name, 'Unit']
+            fig.update_yaxes(title_text=f"Value ({unit})", row=1, col=1)
+            
+            # 2. Histogram and PDF
+            hist_data = ff.create_distplot(
+                [data],
+                [name],
+                bin_size=(np.max(data) - np.min(data)) / bins,
+                show_curve=True,
+                show_rug=False
             )
             
-            # 2. Histogram and PDF (second row, left)
-            hist, bin_edges = np.histogram(data, bins=bins, density=True)
-            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-            
-            # Histogram
             fig.add_trace(
-                go.Bar(
-                    x=bin_centers,
-                    y=hist,
-                    name='Histogram',
-                    marker_color='skyblue',
-                    opacity=0.6
-                ),
+                hist_data['data'][0],  # Histogram
                 row=2, col=1
             )
             
-            # Fit normal distribution
-            mu, sigma = stats.norm.fit(data)
-            x = np.linspace(min(data), max(data), 100)
-            pdf = stats.norm.pdf(x, mu, sigma)
-            
             fig.add_trace(
-                scatter_type(
-                    x=x,
-                    y=pdf,
-                    mode='lines',
-                    name=f'Normal PDF (μ={mu:.2E}, σ={sigma:.2E})',
-                    line=dict(color='red', width=2)
-                ),
+                hist_data['data'][1],  # PDF
                 row=2, col=1
             )
             
-            # 3. Empirical cumulative distribution function (ECDF) (second row, right)
+            # Update x-axis label for histogram
+            fig.update_xaxes(title_text=f"Value ({unit})", row=2, col=1)
+            fig.update_yaxes(title_text="Density", row=2, col=1)
+            
+            # 3. Empirical CDF
             sorted_data = np.sort(data)
-            ecdf = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
-            
-            # Use downsampled data for ECDF if needed
-            if downsample:
-                sample_size = min(max_points, len(sorted_data))
-                indices = np.linspace(0, len(sorted_data) - 1, sample_size).astype(int)
-                sorted_data_sampled = sorted_data[indices]
-                ecdf_sampled = ecdf[indices]
-            else:
-                sorted_data_sampled = sorted_data
-                ecdf_sampled = ecdf
+            cdf = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
             
             fig.add_trace(
                 scatter_type(
-                    x=sorted_data_sampled,
-                    y=ecdf_sampled,
-                    mode='lines',
-                    line=dict(shape='hv'),
-                    name='ECDF'
-                ),
-                row=2, col=2
-            )
-            
-            # Theoretical CDF
-            cdf = stats.norm.cdf(x, mu, sigma)
-            fig.add_trace(
-                scatter_type(
-                    x=x,
+                    x=sorted_data,
                     y=cdf,
                     mode='lines',
-                    name='Normal CDF',
-                    line=dict(color='red', width=2)
+                    name='Empirical CDF'
                 ),
                 row=2, col=2
             )
             
-            # 4. Q-Q plot (third row, left)
-            # Calculate theoretical quantiles
-            # Use a smaller sample for very large datasets
-            if downsample:
-                sample_size = min(max_points, len(data))
-                sample_indices = np.linspace(0, len(data) - 1, sample_size).astype(int)
-                data_sampled = data[sample_indices]
-                theoretical_quantiles = np.random.normal(0, 1, len(data_sampled))
-                theoretical_quantiles.sort()
-                sample_quantiles = np.sort(data_sampled)
-            else:
-                theoretical_quantiles = np.random.normal(0, 1, len(data))
-                theoretical_quantiles.sort()
-                sample_quantiles = np.sort(data)
+            # Update x-axis label for CDF
+            fig.update_xaxes(title_text=f"Value ({unit})", row=2, col=2)
+            fig.update_yaxes(title_text="Cumulative Probability", row=2, col=2)
             
-            # Add Q-Q line
+            # 4. Q-Q Plot
+            qq = stats.probplot(data, dist="norm")
+            theoretical_quantiles = qq[0][0]
+            sample_quantiles = qq[0][1]
+            
             fig.add_trace(
                 scatter_type(
                     x=theoretical_quantiles,
                     y=sample_quantiles,
                     mode='markers',
-                    name='Q-Q Plot',
-                    marker=dict(size=5)
+                    name='Q-Q Plot'
                 ),
                 row=3, col=1
             )
             
-            # Theoretical Q-Q line
-            min_val = min(theoretical_quantiles)
-            max_val = max(theoretical_quantiles)
+            # Add reference line
+            min_val = min(theoretical_quantiles.min(), sample_quantiles.min())
+            max_val = max(theoretical_quantiles.max(), sample_quantiles.max())
             fig.add_trace(
                 scatter_type(
                     x=[min_val, max_val],
-                    y=[min_val * sigma + mu, max_val * sigma + mu],
+                    y=[min_val, max_val],
                     mode='lines',
-                    name='Theoretical Q-Q Line',
-                    line=dict(color='red', width=2)
+                    name='Reference Line',
+                    line=dict(color='red', dash='dash')
                 ),
                 row=3, col=1
             )
             
-            # 5. Peak value probability density function (third row, right)
-            # Plot probability density function of peaks
-            if len(peak_values) > 1:
-                # Peak histogram
-                hist_peaks, bin_edges_peaks = np.histogram(peak_values, bins=min(bins, len(peak_values)//2 + 5), density=True)
-                bin_centers_peaks = (bin_edges_peaks[:-1] + bin_edges_peaks[1:]) / 2
-                
-                fig.add_trace(
-                    go.Bar(
-                        x=bin_centers_peaks,
-                        y=hist_peaks,
-                        name='Peak Histogram',
-                        marker_color='salmon',
-                        opacity=0.6
-                    ),
-                    row=3, col=2
+            # Update x-axis label for Q-Q plot
+            fig.update_xaxes(title_text="Theoretical Quantiles", row=3, col=1)
+            fig.update_yaxes(title_text="Sample Quantiles", row=3, col=1)
+            
+            # 5. Peak Value PDF
+            if len(peak_values) > 0:
+                peak_hist = ff.create_distplot(
+                    [peak_values],
+                    ['Peak Values'],
+                    bin_size=(np.max(peak_values) - np.min(peak_values)) / bins,
+                    show_curve=True,
+                    show_rug=False
                 )
-                
-                # Try to fit normal distribution
-                try:
-                    mu_peaks, sigma_peaks = stats.norm.fit(peak_values)
-                    x_peaks = np.linspace(min(peak_values), max(peak_values), 100)
-                    pdf_peaks = stats.norm.pdf(x_peaks, mu_peaks, sigma_peaks)
                     
-                    fig.add_trace(
-                        scatter_type(
-                            x=x_peaks,
-                            y=pdf_peaks,
-                            mode='lines',
-                            name=f'Peak PDF (μ={mu_peaks:.2E}, σ={sigma_peaks:.2E})',
-                            line=dict(color='green', width=2)
-                        ),
+                fig.add_trace(
+                    peak_hist['data'][0],  # Histogram
                         row=3, col=2
                     )
-                except:
-                    # Fitting failed, ignore
-                    pass
                 
-                # Add peak statistics annotation
-                peak_stats_text = (f"Peak Count: {len(peak_values)}<br>"
-                                  f"Mean: {np.mean(peak_values):.4E}<br>"
-                                  f"Max: {np.max(peak_values):.4E}<br>"
-                                  f"Min: {np.min(peak_values):.4E}")
-                
-                fig.add_annotation(
-                    xref="x domain", yref="y domain",
-                    x=0.05, y=0.95,
-                    text=peak_stats_text,
-                    showarrow=False,
-                    bgcolor="rgba(144, 238, 144, 0.5)",  # lightgreen with alpha
-                    bordercolor="rgba(0, 0, 0, 0.3)",
-                    borderwidth=1,
-                    borderpad=4,
-                    font=dict(size=10),
+                fig.add_trace(
+                    peak_hist['data'][1],  # PDF
                     row=3, col=2
                 )
-            else:
-                # Too few peaks, add text explanation
-                fig.add_annotation(
-                    x=0.5, y=0.5,
-                    text="Insufficient peaks detected for analysis",
-                    showarrow=False,
-                    xref="x domain", yref="y domain",
-                    font=dict(size=12),
-                    row=3, col=2
-                )
+                
+                # Update x-axis label for peak PDF
+                fig.update_xaxes(title_text=f"Peak Value ({unit})", row=3, col=2)
+                fig.update_yaxes(title_text="Density", row=3, col=2)
             
             # Update layout
             fig.update_layout(
-                title=title_override if title_override else f'Statistical Analysis for Channel: {name} (Segment {sseg})',
-                height=1000,  # Increase height to accommodate more subplots
-                width=1100,   # Slightly increase width
+                title=title_override if title_override else f"Statistical Analysis for {name}",
+                height=1200,
                 showlegend=True,
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
-                    y=-0.15,  # Adjust y position to accommodate more subplots
-                    xanchor="center",
-                    x=0.5
-                ),
-                # Performance optimization settings
-                uirevision='constant',  # Keep UI state on updates
-                hovermode='closest',    # Faster hover performance
-                dragmode='zoom' if data_length < 100000 else False  # Disable drag for very large datasets
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
             
-            # Update x-axis titles
-            fig.update_xaxes(title_text="Sample", row=1, col=1)
-            fig.update_xaxes(title_text=f"{name} [{stats_df.loc[name, 'Unit']}]", row=2, col=1)
-            fig.update_xaxes(title_text=f"{name} [{stats_df.loc[name, 'Unit']}]", row=2, col=2)
-            fig.update_xaxes(title_text="Theoretical Quantiles", row=3, col=1)
-            fig.update_xaxes(title_text=f"Peak Magnitude [{stats_df.loc[name, 'Unit']}]", row=3, col=2)
-            
-            # Update y-axis titles
-            fig.update_yaxes(title_text=f"{name} [{stats_df.loc[name, 'Unit']}]", row=1, col=1)
-            fig.update_yaxes(title_text="Density", row=2, col=1)
-            fig.update_yaxes(title_text="Probability", row=2, col=2)
-            fig.update_yaxes(title_text="Sample Quantiles", row=3, col=1)
-            fig.update_yaxes(title_text="Density", row=3, col=2)
-            
-            # Optimized plot settings
-            plot_settings = {
-                "scrollZoom": True,  # Enable mouse scroll for zooming
-                "displayModeBar": True,
-                "modeBarButtonsToAdd": ["eraseshape"],
-                "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],  # Remove slower interactions
-                "displaylogo": False,
-                "responsive": True,
-                "toImageButtonOptions": {
-                    "format": "png",  # PNG is faster than SVG
-                    "width": 1100,
-                    "height": 1000,
-                    "scale": 1  # Lower scale for faster export
-                }
-            }
-            
-            # Save and display
+            # Save figure if requested
             if save_fig:
                 if save_path is None:
-                    save_path = os.getcwd()
-                
-                try:
-                    # First try to save as HTML
-                    fig.write_html(f"{save_path}/{name}_seg{sseg}_stats.html", config=plot_settings)
-                    logger.info(f"Saved interactive plot to: {save_path}/{name}_seg{sseg}_stats.html")
-                    
-                    # If plotly.io is available, also save as image
-                    import plotly.io as pio
-                    pio.write_image(fig, f"{save_path}/{name}_seg{sseg}_stats.png")
-                    logger.info(f"Saved static plot to: {save_path}/{name}_seg{sseg}_stats.png")
-                except Exception as e:
-                    logger.warning(f"Could not save image: {str(e)}")
-                    logger.warning("Try installing the required packages: pip install -U kaleido")
+                    save_path = f"statistics_{name}.html"
+                fig.write_html(save_path)
             
-            # Display figure
-            fig.show(config=plot_settings)
+            # Show figure
+            fig.show()
             
-    except ImportError as e:
-        logger.warning(f"Could not use plotly for visualization: {str(e)}")
-        logger.warning("Using matplotlib as fallback...")
-        _plot_statistics_mpl(pydas_obj, ch_names, sseg, stats_df, bins, save_fig, save_path, 
-                            data=data, title_override=title_override)
+    except Exception as e:
+        logger.error(f"Error in plotly statistical visualization: {e}")
+        raise
 
 def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=None, 
                   xlim=None, ylim=None, grid=True, show=True, save_path=None, 
