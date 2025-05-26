@@ -2608,7 +2608,7 @@ class PyDAS:
                       lam=None, rho=1.025, g=9.807, header_text=None, include_charts=True, 
                       significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
                       zerocrossing_analysis=True, amplitude_analysis=True, 
-                      n_hr_forecast=3, cutoffperiod=15.0):
+                      cutoffperiod=15.0, peak_distance=10):
         """
         为PyDAS对象的所有通道生成详细的Excel分析报告
         
@@ -2640,15 +2640,15 @@ class PyDAS:
             是否进行过零分析
         amplitude_analysis : bool, default=True
             是否进行振幅分析
-        n_hr_forecast : int, default=3
-            极值估计的预测小时数
         cutoffperiod : float, default=15.0
             高低频分离的截止周期（秒），用于分离高频和低频成分
+        peak_distance : int, default=130
+            峰值检测的最小距离参数，用于 Weibull 分析中的峰值检测
             
         Returns
         -------
-        pandas.DataFrame
-            包含所有通道统计数据的DataFrame
+        tuple of pandas.DataFrame
+            包含三个 DataFrame 的元组：(总统计, 低频统计, 高频统计)
             
         Notes
         -----
@@ -2678,8 +2678,8 @@ class PyDAS:
             format_sheet=format_sheet,
             zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis,
-            n_hr_forecast=n_hr_forecast,
-            cutoffperiod=cutoffperiod
+            cutoffperiod=cutoffperiod,
+            peak_distance=peak_distance
         )
 
     def print_statistics(self, printTxt=False, printExcel=False):

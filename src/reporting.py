@@ -29,10 +29,10 @@ from scipy.stats import norm
 logger = logging.getLogger('pydas.reporting')
 
 def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_analysis=True, 
-                      amplitude_analysis=True, significant_percentile=33.0, n_hr_forecast=3,
-                      data_duration_hours=None, dt=None):
+                      amplitude_analysis=True, significant_percentile=33.0,
+                      data_duration_hours=None, dt=None, peak_distance=130):
     """
-    Analyze channel data and return statistical results
+    Analyze channel data and return statistical results including MPM, expected extremes, and Weibull parameters
     
     Parameters
     ----------
@@ -48,18 +48,21 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
         Whether to perform amplitude analysis
     significant_percentile : float, default=33.0
         Percentile for significant value calculation
-    n_hr_forecast : int, default=3
-        Number of hours for extreme value forecast
     data_duration_hours : float, optional
         Duration of data in hours
     dt : float, optional
         Time step
+    peak_distance : int, default=130
+        Minimum distance between peaks for peak detection
         
     Returns
     -------
     dict
-        Dictionary containing all statistical results
+        Dictionary containing all statistical results including Weibull parameters and MPM
     """
+    # Euler-Mascheroni constant for expected extreme value calculation
+    GAMMA = 0.57721566
+    
     # Calculate basic statistics if not provided
     if mean_val is None:
         mean_val = np.mean(data_scaled)
@@ -68,25 +71,31 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
     max_val = np.max(data_scaled)
     min_val = np.min(data_scaled)
     
-    # Calculate skewness and kurtosis
-    skewness = spstats.skew(data_scaled)
-    kurtosis = spstats.kurtosis(data_scaled)
-    
-    # Initialize results
+    # Initialize results (removed skewness, kurtosis, and Weibull parameters)
     results = {
         'maximum': max_val,
         'minimum': min_val,
         'mean': mean_val,
         'STD': std_val,
-        'skewness': skewness,
-        'kurtosis': kurtosis,
         'maximum_double_amplitude': 0,
         'sign_double_amplitude': 0,
         'mean_zerocross_period': 0,
         'zero_upcross': 0,
-        'estimated_max': 0,
-        'estimated_min': 0
+        # MPM and expected extremes
+        'mpm_max': np.nan,
+        'mpm_min': np.nan,
+        'expected_max': np.nan,
+        'expected_min': np.nan,
+        # Percentage increases
+        'percent_increase_max': np.nan,
+        'percent_increase_min': np.nan
     }
+    
+    # MPM Analysis will use peaks from zerocrossing_analysis if available
+    
+
+    
+
     
     if zerocrossing_analysis:
         # Calculate mean crossings
@@ -162,74 +171,44 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
                 results['sign_double_amplitude'] = np.mean(sorted_amps[:n_significant])
                 
                 logger.info(f"Calculated significant double amplitude from {n_significant} highest waves")
-    
-    # Extreme value estimation
-    if n_hr_forecast > 0 and data_duration_hours > 0:
-        try:
-            data_centered = data_scaled - mean_val
-            
-            if zerocrossing_analysis and 'peaks' in locals() and len(peaks) > 10:
-                # Use peak statistics method
-                centered_peaks, _ = signal.find_peaks(data_centered)
-                centered_troughs, _ = signal.find_peaks(-data_centered)
                 
-                if len(centered_peaks) > 0 and len(centered_troughs) > 0:
-                    # Process peaks
-                    peak_values = data_centered[centered_peaks]
-                    if len(peak_values) > 0:
-                        sorted_peaks = np.sort(peak_values)[::-1]
-                        peaks_per_hour = len(peak_values) / data_duration_hours
-                        expected_peaks_in_forecast = peaks_per_hour * n_hr_forecast
-                        
-                        try:
-                            num_fitting_peaks = max(10, int(len(sorted_peaks) * 0.1))
-                            fitting_peaks = sorted_peaks[:num_fitting_peaks]
-                            c, loc, scale = spstats.weibull_min.fit(fitting_peaks, floc=0)
-                            p = 1 - 1/expected_peaks_in_forecast
-                            peak_extreme = spstats.weibull_min.ppf(p, c, loc, scale)
-                            results['estimated_max'] = peak_extreme + mean_val
-                        except:
-                            logger.warning("Weibull fitting failed for peaks, using normal distribution")
-                            forecast_factor = np.sqrt(n_hr_forecast / data_duration_hours)
-                            extreme_factor = 3.5 + 0.5 * np.log(n_hr_forecast / data_duration_hours)
-                            extreme_std = std_val * forecast_factor
-                            results['estimated_max'] = mean_val + extreme_factor * extreme_std
-                    
-                    # Process troughs
-                    trough_values = data_centered[centered_troughs]
-                    if len(trough_values) > 0:
-                        sorted_troughs = np.sort(trough_values)
-                        troughs_per_hour = len(trough_values) / data_duration_hours
-                        expected_troughs_in_forecast = troughs_per_hour * n_hr_forecast
-                        
-                        try:
-                            num_fitting_troughs = max(10, int(len(sorted_troughs) * 0.1))
-                            fitting_troughs = -sorted_troughs[:num_fitting_troughs]
-                            c, loc, scale = spstats.weibull_min.fit(fitting_troughs, floc=0)
-                            p = 1 - 1/expected_troughs_in_forecast
-                            trough_extreme = -spstats.weibull_min.ppf(p, c, loc, scale)
-                            results['estimated_min'] = trough_extreme + mean_val
-                        except:
-                            logger.warning("Weibull fitting failed for troughs, using normal distribution")
-                            forecast_factor = np.sqrt(n_hr_forecast / data_duration_hours)
-                            extreme_factor = 3.5 + 0.5 * np.log(n_hr_forecast / data_duration_hours)
-                            extreme_std = std_val * forecast_factor
-                            results['estimated_min'] = mean_val - extreme_factor * extreme_std
-            else:
-                # Use normal distribution method
-                logger.info("Using normal distribution method for extreme value estimation")
-                forecast_factor = np.sqrt(n_hr_forecast / data_duration_hours)
-                extreme_factor = 3.5 + 0.5 * np.log(n_hr_forecast / data_duration_hours)
-                extreme_std = std_val * forecast_factor
-                results['estimated_max'] = mean_val + extreme_factor * extreme_std
-                results['estimated_min'] = mean_val - extreme_factor * extreme_std
-        except Exception as e:
-            logger.warning(f"Error in extreme value estimation: {str(e)}")
-            forecast_factor = np.sqrt(n_hr_forecast / data_duration_hours)
-            extreme_factor = 3.5 + 0.5 * np.log(n_hr_forecast / data_duration_hours)
-            extreme_std = std_val * forecast_factor
-            results['estimated_max'] = mean_val + extreme_factor * extreme_std
-            results['estimated_min'] = mean_val - extreme_factor * extreme_std
+            # MPM Analysis using peaks from zerocrossing analysis
+            if len(peaks) > 0:
+                # Extract positive peaks (for maximum extremes)
+                positive_peaks = data_scaled[peaks][data_scaled[peaks] > 0]
+                
+                # Fit Weibull to positive peaks if enough data points exist
+                if len(positive_peaks) >= 10:
+                    try:
+                        shape_pos, loc_pos, scale_pos = spstats.weibull_min.fit(positive_peaks)
+                        N_pos = len(positive_peaks)
+                        results['mpm_max'] = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos)
+                        results['expected_max'] = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos) + scale_pos * GAMMA * (np.log(N_pos))**(1/shape_pos - 1) / shape_pos
+                        results['percent_increase_max'] = (results['expected_max'] - results['mpm_max']) / abs(results['mpm_max']) * 100 if results['mpm_max'] != 0 else np.nan
+                    except Exception as e:
+                        logger.warning(f"MPM analysis failed for positive peaks: {e}")
+                else:
+                    logger.warning(f"Too few positive peaks (< 10) for MPM analysis: {len(positive_peaks)} peaks found")
+                
+            if len(troughs) > 0:
+                # Extract negative peaks (for minimum extremes) and take absolute values
+                negative_peaks = data_scaled[troughs][data_scaled[troughs] < 0]
+                negative_peaks_abs = -negative_peaks
+                
+                # Fit Weibull to absolute negative peaks if enough data points exist
+                if len(negative_peaks_abs) >= 10:
+                    try:
+                        shape_neg, loc_neg, scale_neg = spstats.weibull_min.fit(negative_peaks_abs)
+                        N_neg = len(negative_peaks_abs)
+                        results['mpm_min'] = -(loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg))
+                        results['expected_min'] = -(loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg) + scale_neg * GAMMA * (np.log(N_neg))**(1/shape_neg - 1) / shape_neg)
+                        results['percent_increase_min'] = (results['expected_min'] - results['mpm_min']) / abs(results['mpm_min']) * 100 if results['mpm_min'] != 0 else np.nan
+                    except Exception as e:
+                        logger.warning(f"MPM analysis failed for negative peaks: {e}")
+                else:
+                    logger.warning(f"Too few negative peaks (< 10) for MPM analysis: {len(negative_peaks_abs)} peaks found")
+    
+
     
     return results
 
@@ -237,7 +216,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                   lam=None, rho=1.025, g=9.807, header_text=None, include_charts=False, 
                   significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
                   zerocrossing_analysis=True, amplitude_analysis=True, 
-                  n_hr_forecast=3, cutoffperiod=15.0):
+                  cutoffperiod=15.0, peak_distance=10):
     """
     为PyDAS对象的所有通道生成详细的Excel分析报告，包括高低频分离分析
     
@@ -271,15 +250,15 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         是否进行过零分析
     amplitude_analysis : bool, default=True
         是否进行振幅分析
-    n_hr_forecast : int, default=3
-        极值估计的预测小时数
     cutoffperiod : float, default=15.0
         高低频分离的截止周期（秒），用于分离高频和低频成分
+    peak_distance : int, default=130
+        峰值检测的最小距离参数，用于 Weibull 分析中的峰值检测
         
     Returns
     -------
-    pandas.DataFrame
-        包含所有通道统计数据的DataFrame
+    tuple of pandas.DataFrame
+        包含三个 DataFrame 的元组：(总统计, 低频统计, 高频统计)
         
     Notes
     -----
@@ -322,8 +301,9 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         'channel\nID', 'Name', 'unit', 'number\nof zero\nupcross', 
         'maximum', 'minimum', 'mean', 'STD',
         'maximum\ndouble\namplitude', 'sign.\ndouble\namplitude', 
-        'skewness', 'kurtosis',
-        'mean\nzerocro.\nperiod', 'estimated\n3hr\nmaximum', 'estimated\n3hr\nminimum'
+        'MPM_max', 'MPM_min', 'expected_max', 'expected_min',
+        'inc_max_%', 'inc_min_%',
+        'mean\nzerocro.\nperiod'
     ]
     
     # 创建三个结果DataFrame
@@ -358,19 +338,19 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         results_total_ch = analyze_channel_data(
             data_scaled, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            n_hr_forecast=n_hr_forecast, data_duration_hours=data_duration_hours, dt=dt
+            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance
         )
         
         results_low_ch = analyze_channel_data(
             data_low, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            n_hr_forecast=n_hr_forecast, data_duration_hours=data_duration_hours, dt=dt
+            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance
         )
         
         results_high_ch = analyze_channel_data(
             data_high, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            n_hr_forecast=n_hr_forecast, data_duration_hours=data_duration_hours, dt=dt
+            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance
         )
         
         # 将结果添加到相应的DataFrame
@@ -380,9 +360,10 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_total_ch['mean'], results_total_ch['STD'],
             results_total_ch['maximum_double_amplitude'],
             results_total_ch['sign_double_amplitude'],
-            results_total_ch['skewness'], results_total_ch['kurtosis'],
-            results_total_ch['mean_zerocross_period'],
-            results_total_ch['estimated_max'], results_total_ch['estimated_min']
+            results_total_ch['mpm_max'], results_total_ch['mpm_min'], 
+            results_total_ch['expected_max'], results_total_ch['expected_min'],
+            results_total_ch['percent_increase_max'], results_total_ch['percent_increase_min'],
+            results_total_ch['mean_zerocross_period']
         ]
         
         results_low.loc[ch_idx] = [
@@ -391,9 +372,10 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_low_ch['mean'], results_low_ch['STD'],
             results_low_ch['maximum_double_amplitude'],
             results_low_ch['sign_double_amplitude'],
-            results_low_ch['skewness'], results_low_ch['kurtosis'],
-            results_low_ch['mean_zerocross_period'],
-            results_low_ch['estimated_max'], results_low_ch['estimated_min']
+            results_low_ch['mpm_max'], results_low_ch['mpm_min'], 
+            results_low_ch['expected_max'], results_low_ch['expected_min'],
+            results_low_ch['percent_increase_max'], results_low_ch['percent_increase_min'],
+            results_low_ch['mean_zerocross_period']
         ]
         
         results_high.loc[ch_idx] = [
@@ -402,9 +384,10 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_high_ch['mean'], results_high_ch['STD'],
             results_high_ch['maximum_double_amplitude'],
             results_high_ch['sign_double_amplitude'],
-            results_high_ch['skewness'], results_high_ch['kurtosis'],
-            results_high_ch['mean_zerocross_period'],
-            results_high_ch['estimated_max'], results_high_ch['estimated_min']
+            results_high_ch['mpm_max'], results_high_ch['mpm_min'], 
+            results_high_ch['expected_max'], results_high_ch['expected_min'],
+            results_high_ch['percent_increase_max'], results_high_ch['percent_increase_min'],
+            results_high_ch['mean_zerocross_period']
         ]
 
     # 创建Excel文件
@@ -501,11 +484,13 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                             4: 10,  # 零上穿数
                             9: 15,  # 最大双振幅
                             10: 15, # 显著双振幅
-                            11: 15, # 偏度
-                            12: 15, # 峰度
-                            13: 12, # 平均零上穿周期
-                            14: 14, # 预估3小时最大值
-                            15: 14  # 预估3小时最小值
+                            11: 12, # MPM_max
+                            12: 12, # MPM_min
+                            13: 14, # expected_max
+                            14: 14, # expected_min
+                            15: 12, # inc_max_%
+                            16: 12, # inc_min_%
+                            17: 12  # 平均零上穿周期
                         }
                         
                         for i in range(1, ws.max_column + 1):
