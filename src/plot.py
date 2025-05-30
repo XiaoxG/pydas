@@ -894,15 +894,6 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     uirevision='constant'  # 维持缩放级别
                 )
                 
-                # Set equal aspect ratio if requested
-                if equal_aspect:
-                    fig.update_layout(
-                        yaxis=dict(
-                            scaleanchor="x",
-                            scaleratio=1,
-                        )
-                )
-                
                 # Update axes
                 fig.update_xaxes(showgrid=grid, zeroline=grid)
                 fig.update_yaxes(showgrid=grid, zeroline=grid)
@@ -1065,10 +1056,6 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 
                 # Set grid
                 ax.grid(grid)
-                
-                # Set equal aspect ratio if requested
-                if equal_aspect:
-                    ax.set_aspect('equal')
                 
                 # Set axis limits if provided
                 if xlim is not None:

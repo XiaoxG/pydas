@@ -82,14 +82,17 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
         'mean_zerocross_period': 0,
         'zero_upcross': 0,
         # MPM and expected extremes
-        'mpm_max': np.nan,
-        'mpm_min': np.nan,
-        'expected_max': np.nan,
-        'expected_min': np.nan,
+        'mpm_pos': np.nan,
+        'mpm_neg': np.nan,
+        'expected_pos': np.nan,
+        'expected_neg': np.nan,
         # Percentage increases
-        'percent_increase_max': np.nan,
-        'percent_increase_min': np.nan
+        'percent_increase_pos': np.nan,
+        'percent_increase_neg': np.nan
     }
+    
+    # Remove mean for MPM analysis
+    data_centered = data_scaled - mean_val
     
     # MPM Analysis will use peaks from zerocrossing_analysis if available
     
@@ -98,53 +101,82 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
 
     
     if zerocrossing_analysis:
-        # Calculate mean crossings
-        data_centered = data_scaled - mean_val
+        # Calculate mean crossings (already have data_centered)
         zero_crossings = np.where(np.diff(np.signbit(data_centered)))[0]
         upcrossings = [i for i in zero_crossings if data_centered[i+1] > data_centered[i]]
         results['zero_upcross'] = len(upcrossings)
         
-        # Calculate mean period
+        # Calculate mean period first (before peak detection)
+        mean_period_samples = 0
         if results['zero_upcross'] > 1:
             periods = np.diff(upcrossings) * dt
             results['mean_zerocross_period'] = np.mean(periods)
+            # Convert to samples
+            mean_period_samples = int(results['mean_zerocross_period'] / dt)
         
-        # Find peaks and troughs
-        peaks, _ = signal.find_peaks(data_scaled)
-        troughs, _ = signal.find_peaks(-data_scaled)
+        # Set peak detection distance based on mean zero-crossing period
+        # Use 0.5 times the mean period as minimum peak distance
+        if mean_period_samples > 0:
+            min_peak_distance = int(0.5 * mean_period_samples)
+            logger.info(f"Using peak distance of {min_peak_distance} samples (0.5 × mean period of {mean_period_samples} samples)")
+        else:
+            # Fallback to user-provided or default value
+            min_peak_distance = peak_distance
+            logger.info(f"No valid mean period, using default peak distance of {min_peak_distance} samples")
+        
+        # Find peaks and troughs on original data with appropriate distance constraint
+        peaks, _ = signal.find_peaks(data_scaled, distance=min_peak_distance)
+        troughs, _ = signal.find_peaks(-data_scaled, distance=min_peak_distance)
         
         if len(peaks) > 0 and len(troughs) > 0:
             # Sort peaks and troughs
             peaks = np.sort(peaks)
             troughs = np.sort(troughs)
             
-            # Calculate double amplitudes
+            # Calculate double amplitudes (using original data)
             double_amplitudes = []
             
-            # Method 1: For each peak, find the largest amplitude with adjacent troughs
-            for peak_idx in peaks:
-                peak_val = data_scaled[peak_idx]
-                
-                # Find previous trough
-                prev_troughs = troughs[troughs < peak_idx]
-                prev_amp = 0
-                if len(prev_troughs) > 0:
-                    prev_trough_idx = prev_troughs[-1]
-                    prev_amp = peak_val - data_scaled[prev_trough_idx]
-                
-                # Find next trough
-                next_troughs = troughs[troughs > peak_idx]
-                next_amp = 0
-                if len(next_troughs) > 0:
-                    next_trough_idx = next_troughs[0]
-                    next_amp = peak_val - data_scaled[next_trough_idx]
-                
-                # Select larger amplitude
-                double_amp = max(prev_amp, next_amp, 0)
-                if double_amp > 0:
-                    double_amplitudes.append(double_amp)
+            # Method 1: Calculate double amplitude for each complete wave (trough-peak-trough pattern)
+            # First, merge and sort peaks and troughs with their types
+            extrema_indices = []
+            extrema_types = []
+            extrema_values = []
             
-            # Method 2: Use zero-crossing waves if available
+            for idx in peaks:
+                extrema_indices.append(idx)
+                extrema_types.append('peak')
+                extrema_values.append(data_scaled[idx])
+                
+            for idx in troughs:
+                extrema_indices.append(idx)
+                extrema_types.append('trough')
+                extrema_values.append(data_scaled[idx])
+            
+            # Sort by index
+            if len(extrema_indices) > 0:
+                sort_order = np.argsort(extrema_indices)
+                extrema_indices = np.array(extrema_indices)[sort_order]
+                extrema_types = np.array(extrema_types)[sort_order]
+                extrema_values = np.array(extrema_values)[sort_order]
+                
+                # Find trough-peak-trough patterns
+                for i in range(1, len(extrema_types) - 1):
+                    if (extrema_types[i-1] == 'trough' and 
+                        extrema_types[i] == 'peak' and 
+                        extrema_types[i+1] == 'trough'):
+                        # Found a complete wave pattern
+                        trough1_val = extrema_values[i-1]
+                        peak_val = extrema_values[i]
+                        trough2_val = extrema_values[i+1]
+                        
+                        # Double amplitude is from the lower trough to the peak
+                        lower_trough = min(trough1_val, trough2_val)
+                        double_amp = peak_val - lower_trough
+                        
+                        if double_amp > 0:
+                            double_amplitudes.append(double_amp)
+            
+            # Method 2: Use zero-crossing waves for more accurate wave-by-wave analysis
             if zerocrossing_analysis and len(upcrossings) > 1:
                 wave_amplitudes = []
                 for i in range(len(upcrossings) - 1):
@@ -152,14 +184,19 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
                     end_idx = upcrossings[i+1]
                     wave_segment = data_scaled[start_idx:end_idx+1]
                     if len(wave_segment) > 2:
-                        wave_amp = np.max(wave_segment) - np.min(wave_segment)
-                        wave_amplitudes.append(wave_amp)
+                        # Double amplitude is max minus min within the wave
+                        wave_max = np.max(wave_segment)
+                        wave_min = np.min(wave_segment)
+                        wave_amp = wave_max - wave_min
+                        if wave_amp > 0:
+                            wave_amplitudes.append(wave_amp)
                 
-                if len(wave_amplitudes) > len(double_amplitudes):
-                    logger.info(f"Using zero-crossing method for wave amplitude calculation")
+                # Use zero-crossing method if it provides more complete analysis
+                if len(wave_amplitudes) > 0:
+                    logger.info(f"Using zero-crossing method for double amplitude calculation ({len(wave_amplitudes)} waves)")
                     double_amplitudes = wave_amplitudes
                 elif len(double_amplitudes) > 0:
-                    logger.info(f"Using peak-trough matching method for wave amplitude calculation")
+                    logger.info(f"Using trough-peak-trough method for double amplitude calculation ({len(double_amplitudes)} waves)")
             
             if len(double_amplitudes) > 0:
                 results['maximum_double_amplitude'] = np.max(double_amplitudes)
@@ -172,37 +209,53 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
                 
                 logger.info(f"Calculated significant double amplitude from {n_significant} highest waves")
                 
-            # MPM Analysis using peaks from zerocrossing analysis
+            # MPM Analysis using centered data
             if len(peaks) > 0:
-                # Extract positive peaks (for maximum extremes)
-                positive_peaks = data_scaled[peaks][data_scaled[peaks] > 0]
+                # Extract positive peaks from centered data
+                positive_peaks = data_centered[peaks]
+                positive_peaks = positive_peaks[positive_peaks > 0]
                 
                 # Fit Weibull to positive peaks if enough data points exist
                 if len(positive_peaks) >= 10:
                     try:
-                        shape_pos, loc_pos, scale_pos = spstats.weibull_min.fit(positive_peaks)
+                        # Fit Weibull distribution to positive extremes
+                        shape_pos, loc_pos, scale_pos = spstats.weibull_min.fit(positive_peaks, floc=0)
                         N_pos = len(positive_peaks)
-                        results['mpm_max'] = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos)
-                        results['expected_max'] = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos) + scale_pos * GAMMA * (np.log(N_pos))**(1/shape_pos - 1) / shape_pos
-                        results['percent_increase_max'] = (results['expected_max'] - results['mpm_max']) / abs(results['mpm_max']) * 100 if results['mpm_max'] != 0 else np.nan
+                        
+                        # Calculate MPM for centered data
+                        mpm_centered = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos)
+                        expected_centered = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos) + scale_pos * GAMMA * (np.log(N_pos))**(1/shape_pos - 1) / shape_pos
+                        
+                        # Add mean back for final results
+                        results['mpm_pos'] = mean_val + mpm_centered
+                        results['expected_pos'] = mean_val + expected_centered
+                        results['percent_increase_pos'] = (expected_centered - mpm_centered) / abs(mpm_centered) * 100 if mpm_centered != 0 else np.nan
                     except Exception as e:
                         logger.warning(f"MPM analysis failed for positive peaks: {e}")
                 else:
                     logger.warning(f"Too few positive peaks (< 10) for MPM analysis: {len(positive_peaks)} peaks found")
                 
             if len(troughs) > 0:
-                # Extract negative peaks (for minimum extremes) and take absolute values
-                negative_peaks = data_scaled[troughs][data_scaled[troughs] < 0]
-                negative_peaks_abs = -negative_peaks
+                # Extract negative peaks from centered data and convert to positive values
+                negative_peaks = data_centered[troughs]
+                negative_peaks = negative_peaks[negative_peaks < 0]
+                negative_peaks_abs = -negative_peaks  # Convert to positive for Weibull fitting
                 
                 # Fit Weibull to absolute negative peaks if enough data points exist
                 if len(negative_peaks_abs) >= 10:
                     try:
-                        shape_neg, loc_neg, scale_neg = spstats.weibull_min.fit(negative_peaks_abs)
+                        # Fit Weibull distribution to negative extremes (as positive values)
+                        shape_neg, loc_neg, scale_neg = spstats.weibull_min.fit(negative_peaks_abs, floc=0)
                         N_neg = len(negative_peaks_abs)
-                        results['mpm_min'] = -(loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg))
-                        results['expected_min'] = -(loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg) + scale_neg * GAMMA * (np.log(N_neg))**(1/shape_neg - 1) / shape_neg)
-                        results['percent_increase_min'] = (results['expected_min'] - results['mpm_min']) / abs(results['mpm_min']) * 100 if results['mpm_min'] != 0 else np.nan
+                        
+                        # Calculate MPM for centered data
+                        mpm_centered = loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg)
+                        expected_centered = loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg) + scale_neg * GAMMA * (np.log(N_neg))**(1/shape_neg - 1) / shape_neg
+                        
+                        # Add mean back and negate for minimum values
+                        results['mpm_neg'] = mean_val - mpm_centered
+                        results['expected_neg'] = mean_val - expected_centered
+                        results['percent_increase_neg'] = (expected_centered - mpm_centered) / abs(mpm_centered) * 100 if mpm_centered != 0 else np.nan
                     except Exception as e:
                         logger.warning(f"MPM analysis failed for negative peaks: {e}")
                 else:
@@ -301,8 +354,8 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         'channel\nID', 'Name', 'unit', 'number\nof zero\nupcross', 
         'maximum', 'minimum', 'mean', 'STD',
         'maximum\ndouble\namplitude', 'sign.\ndouble\namplitude', 
-        'MPM_max', 'MPM_min', 'expected_max', 'expected_min',
-        'inc_max_%', 'inc_min_%',
+        'MPM_pos', 'MPM_neg', 'expected_pos', 'expected_neg',
+        'inc_pos_%', 'inc_neg_%',
         'mean\nzerocro.\nperiod'
     ]
     
@@ -360,9 +413,9 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_total_ch['mean'], results_total_ch['STD'],
             results_total_ch['maximum_double_amplitude'],
             results_total_ch['sign_double_amplitude'],
-            results_total_ch['mpm_max'], results_total_ch['mpm_min'], 
-            results_total_ch['expected_max'], results_total_ch['expected_min'],
-            results_total_ch['percent_increase_max'], results_total_ch['percent_increase_min'],
+            results_total_ch['mpm_pos'], results_total_ch['mpm_neg'], 
+            results_total_ch['expected_pos'], results_total_ch['expected_neg'],
+            results_total_ch['percent_increase_pos'], results_total_ch['percent_increase_neg'],
             results_total_ch['mean_zerocross_period']
         ]
         
@@ -372,9 +425,9 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_low_ch['mean'], results_low_ch['STD'],
             results_low_ch['maximum_double_amplitude'],
             results_low_ch['sign_double_amplitude'],
-            results_low_ch['mpm_max'], results_low_ch['mpm_min'], 
-            results_low_ch['expected_max'], results_low_ch['expected_min'],
-            results_low_ch['percent_increase_max'], results_low_ch['percent_increase_min'],
+            results_low_ch['mpm_pos'], results_low_ch['mpm_neg'], 
+            results_low_ch['expected_pos'], results_low_ch['expected_neg'],
+            results_low_ch['percent_increase_pos'], results_low_ch['percent_increase_neg'],
             results_low_ch['mean_zerocross_period']
         ]
         
@@ -384,9 +437,9 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_high_ch['mean'], results_high_ch['STD'],
             results_high_ch['maximum_double_amplitude'],
             results_high_ch['sign_double_amplitude'],
-            results_high_ch['mpm_max'], results_high_ch['mpm_min'], 
-            results_high_ch['expected_max'], results_high_ch['expected_min'],
-            results_high_ch['percent_increase_max'], results_high_ch['percent_increase_min'],
+            results_high_ch['mpm_pos'], results_high_ch['mpm_neg'], 
+            results_high_ch['expected_pos'], results_high_ch['expected_neg'],
+            results_high_ch['percent_increase_pos'], results_high_ch['percent_increase_neg'],
             results_high_ch['mean_zerocross_period']
         ]
 
@@ -484,12 +537,12 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                             4: 10,  # 零上穿数
                             9: 15,  # 最大双振幅
                             10: 15, # 显著双振幅
-                            11: 12, # MPM_max
-                            12: 12, # MPM_min
-                            13: 14, # expected_max
-                            14: 14, # expected_min
-                            15: 12, # inc_max_%
-                            16: 12, # inc_min_%
+                            11: 12, # MPM_pos
+                            12: 12, # MPM_neg
+                            13: 14, # expected_pos
+                            14: 14, # expected_neg
+                            15: 12, # inc_pos_%
+                            16: 12, # inc_neg_%
                             17: 12  # 平均零上穿周期
                         }
                         
