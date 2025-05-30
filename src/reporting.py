@@ -30,7 +30,8 @@ logger = logging.getLogger('pydas.reporting')
 
 def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_analysis=True, 
                       amplitude_analysis=True, significant_percentile=33.0,
-                      data_duration_hours=None, dt=None, peak_distance=130):
+                      data_duration_hours=None, dt=None, peak_distance=130, 
+                      pot_threshold_factor=1.5):
     """
     Analyze channel data and return statistical results including MPM, expected extremes, and Weibull parameters
     
@@ -54,6 +55,9 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
         Time step
     peak_distance : int, default=130
         Minimum distance between peaks for peak detection
+    pot_threshold_factor : float, default=1.5
+        Factor to multiply standard deviation for Peak Over Threshold (POT) method
+        Common values: 1.5 (moderate), 2.0 (conservative), 1.0 (aggressive)
         
     Returns
     -------
@@ -209,57 +213,81 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
                 
                 logger.info(f"Calculated significant double amplitude from {n_significant} highest waves")
                 
-            # MPM Analysis using centered data
+            # MPM Analysis using centered data with Peak Over Threshold (POT) method
             if len(peaks) > 0:
                 # Extract positive peaks from centered data
                 positive_peaks = data_centered[peaks]
                 positive_peaks = positive_peaks[positive_peaks > 0]
                 
-                # Fit Weibull to positive peaks if enough data points exist
-                if len(positive_peaks) >= 10:
+                # Apply Peak Over Threshold (POT) method
+                # Set threshold at 1.5 times standard deviation (commonly used in practice)
+                threshold_pos = pot_threshold_factor * std_val
+                peaks_over_threshold = positive_peaks[positive_peaks > threshold_pos]
+                
+                logger.info(f"Positive peaks: {len(positive_peaks)} total, {len(peaks_over_threshold)} over threshold ({threshold_pos:.3f})")
+                
+                # Fit Weibull to peaks over threshold if enough data points exist
+                if len(peaks_over_threshold) >= 10:
                     try:
-                        # Fit Weibull distribution to positive extremes
-                        shape_pos, loc_pos, scale_pos = spstats.weibull_min.fit(positive_peaks, floc=0)
-                        N_pos = len(positive_peaks)
+                        # Subtract threshold to get excesses over threshold
+                        excesses = peaks_over_threshold - threshold_pos
                         
-                        # Calculate MPM for centered data
-                        mpm_centered = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos)
-                        expected_centered = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos) + scale_pos * GAMMA * (np.log(N_pos))**(1/shape_pos - 1) / shape_pos
+                        # Fit Weibull distribution to excesses
+                        shape_pos, loc_pos, scale_pos = spstats.weibull_min.fit(excesses, floc=0)
+                        N_pos = len(peaks_over_threshold)
                         
-                        # Add mean back for final results
-                        results['mpm_pos'] = mean_val + mpm_centered
-                        results['expected_pos'] = mean_val + expected_centered
-                        results['percent_increase_pos'] = (expected_centered - mpm_centered) / abs(mpm_centered) * 100 if mpm_centered != 0 else np.nan
+                        # Calculate MPM for excesses
+                        mpm_excess = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos)
+                        expected_excess = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos) + scale_pos * GAMMA * (np.log(N_pos))**(1/shape_pos - 1) / shape_pos
+                        
+                        # Add threshold and mean back for final results
+                        results['mpm_pos'] = mean_val + threshold_pos + mpm_excess
+                        results['expected_pos'] = mean_val + threshold_pos + expected_excess
+                        results['percent_increase_pos'] = (expected_excess - mpm_excess) / abs(mpm_excess) * 100 if mpm_excess != 0 else np.nan
+                        
+                        logger.info(f"MPM analysis completed for positive peaks (Weibull shape={shape_pos:.3f})")
                     except Exception as e:
                         logger.warning(f"MPM analysis failed for positive peaks: {e}")
                 else:
-                    logger.warning(f"Too few positive peaks (< 10) for MPM analysis: {len(positive_peaks)} peaks found")
+                    logger.warning(f"Too few positive peaks over threshold (< 10) for MPM analysis: {len(peaks_over_threshold)} peaks found")
                 
             if len(troughs) > 0:
                 # Extract negative peaks from centered data and convert to positive values
                 negative_peaks = data_centered[troughs]
                 negative_peaks = negative_peaks[negative_peaks < 0]
-                negative_peaks_abs = -negative_peaks  # Convert to positive for Weibull fitting
+                negative_peaks_abs = -negative_peaks  # Convert to positive for analysis
                 
-                # Fit Weibull to absolute negative peaks if enough data points exist
-                if len(negative_peaks_abs) >= 10:
+                # Apply Peak Over Threshold (POT) method
+                # Set threshold at 1.5 times standard deviation
+                threshold_neg = pot_threshold_factor * std_val
+                peaks_over_threshold_neg = negative_peaks_abs[negative_peaks_abs > threshold_neg]
+                
+                logger.info(f"Negative peaks: {len(negative_peaks_abs)} total, {len(peaks_over_threshold_neg)} over threshold ({threshold_neg:.3f})")
+                
+                # Fit Weibull to peaks over threshold if enough data points exist
+                if len(peaks_over_threshold_neg) >= 10:
                     try:
-                        # Fit Weibull distribution to negative extremes (as positive values)
-                        shape_neg, loc_neg, scale_neg = spstats.weibull_min.fit(negative_peaks_abs, floc=0)
-                        N_neg = len(negative_peaks_abs)
+                        # Subtract threshold to get excesses over threshold
+                        excesses = peaks_over_threshold_neg - threshold_neg
                         
-                        # Calculate MPM for centered data
-                        mpm_centered = loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg)
-                        expected_centered = loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg) + scale_neg * GAMMA * (np.log(N_neg))**(1/shape_neg - 1) / shape_neg
+                        # Fit Weibull distribution to excesses
+                        shape_neg, loc_neg, scale_neg = spstats.weibull_min.fit(excesses, floc=0)
+                        N_neg = len(peaks_over_threshold_neg)
                         
-                        # Add mean back and negate for minimum values
-                        results['mpm_neg'] = mean_val - mpm_centered
-                        results['expected_neg'] = mean_val - expected_centered
-                        results['percent_increase_neg'] = (expected_centered - mpm_centered) / abs(mpm_centered) * 100 if mpm_centered != 0 else np.nan
+                        # Calculate MPM for excesses
+                        mpm_excess = loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg)
+                        expected_excess = loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg) + scale_neg * GAMMA * (np.log(N_neg))**(1/shape_neg - 1) / shape_neg
+                        
+                        # Add threshold and mean back and negate for minimum values
+                        results['mpm_neg'] = mean_val - (threshold_neg + mpm_excess)
+                        results['expected_neg'] = mean_val - (threshold_neg + expected_excess)
+                        results['percent_increase_neg'] = (expected_excess - mpm_excess) / abs(mpm_excess) * 100 if mpm_excess != 0 else np.nan
+                        
+                        logger.info(f"MPM analysis completed for negative peaks (Weibull shape={shape_neg:.3f})")
                     except Exception as e:
                         logger.warning(f"MPM analysis failed for negative peaks: {e}")
                 else:
-                    logger.warning(f"Too few negative peaks (< 10) for MPM analysis: {len(negative_peaks_abs)} peaks found")
+                    logger.warning(f"Too few negative peaks over threshold (< 10) for MPM analysis: {len(peaks_over_threshold_neg)} peaks found")
     
 
     
@@ -269,7 +297,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                   lam=None, rho=1.025, g=9.807, header_text=None, include_charts=False, 
                   significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
                   zerocrossing_analysis=True, amplitude_analysis=True, 
-                  cutoffperiod=15.0, peak_distance=10):
+                  cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5):
     """
     为PyDAS对象的所有通道生成详细的Excel分析报告，包括高低频分离分析
     
@@ -307,6 +335,9 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         高低频分离的截止周期（秒），用于分离高频和低频成分
     peak_distance : int, default=130
         峰值检测的最小距离参数，用于 Weibull 分析中的峰值检测
+    pot_threshold_factor : float, default=1.5
+        峰值超阈值（POT）方法的阈值系数，阈值 = pot_threshold_factor × 标准差
+        常用值：1.0（激进）、1.5（适中）、2.0（保守）
         
     Returns
     -------
@@ -391,19 +422,22 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         results_total_ch = analyze_channel_data(
             data_scaled, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance
+            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
+            pot_threshold_factor=pot_threshold_factor
         )
         
         results_low_ch = analyze_channel_data(
             data_low, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance
+            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
+            pot_threshold_factor=pot_threshold_factor
         )
         
         results_high_ch = analyze_channel_data(
             data_high, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance
+            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
+            pot_threshold_factor=pot_threshold_factor
         )
         
         # 将结果添加到相应的DataFrame
