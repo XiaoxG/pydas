@@ -28,12 +28,15 @@ from scipy.stats import norm
 # Set up logging
 logger = logging.getLogger('pydas.reporting')
 
+# Euler-Mascheroni constant for expected extreme value calculation
+GAMMA = 0.57721566
+
 def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_analysis=True, 
                       amplitude_analysis=True, significant_percentile=33.0,
                       data_duration_hours=None, dt=None, peak_distance=130, 
-                      pot_threshold_factor=1.5):
+                      pot_threshold_factor=1.5, mpm_method='POT'):
     """
-    Analyze channel data and return statistical results including MPM, expected extremes, and Weibull parameters
+    Analyze channel data and return statistical results including MPM, EEV, and ocean engineering parameters
     
     Parameters
     ----------
@@ -56,16 +59,23 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
     peak_distance : int, default=130
         Minimum distance between peaks for peak detection
     pot_threshold_factor : float, default=1.5
-        Factor to multiply standard deviation for Peak Over Threshold (POT) method
-        Common values: 1.5 (moderate), 2.0 (conservative), 1.0 (aggressive)
+        峰值超阈值（POT）方法的阈值系数
+        实际阈值 = pot_threshold_factor × 标准差 / √2（考虑单侧分布）
+        常用值：1.0（激进）、1.5（适中）、2.0（保守）
+    mpm_method : str, default='POT'
+        MPM（最可能最大值）的计算方法
+        - 'POT': 峰值超阈值方法，使用Weibull分布拟合（默认，更精确但计算复杂）
+        - 'STD': 基于标准差的简化方法（假设窄带过程，适用于线性波浪）
         
     Returns
     -------
     dict
-        Dictionary containing all statistical results including Weibull parameters and MPM
+        Dictionary containing all statistical results including:
+        - Basic statistics: maximum, minimum, mean, STD
+        - Wave parameters: maximum_double_amplitude, sign_double_amplitude, mean_zerocross_period, zero_upcross
+        - Extreme values: MPM (Most Probable Maximum) and EEV (Expected Extreme Value) for positive and negative peaks
+        - Ocean engineering parameters: irregularity_factor, crest_factor
     """
-    # Euler-Mascheroni constant for expected extreme value calculation
-    GAMMA = 0.57721566
     
     # Calculate basic statistics if not provided
     if mean_val is None:
@@ -83,26 +93,24 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
         'STD': std_val,
         'maximum_double_amplitude': 0,
         'sign_double_amplitude': 0,
+        'pos_sign_amplitude': np.nan,  # Positive significant amplitude
+        'neg_sign_amplitude': np.nan,  # Negative significant amplitude
         'mean_zerocross_period': 0,
         'zero_upcross': 0,
         # MPM and expected extremes
         'mpm_pos': np.nan,
         'mpm_neg': np.nan,
-        'expected_pos': np.nan,
-        'expected_neg': np.nan,
-        # Percentage increases
-        'percent_increase_pos': np.nan,
-        'percent_increase_neg': np.nan
+        'eev_pos': np.nan,
+        'eev_neg': np.nan,
+        # New ocean engineering parameters
+        'irregularity_factor': np.nan,
+        'crest_factor': np.nan
     }
     
     # Remove mean for MPM analysis
     data_centered = data_scaled - mean_val
     
     # MPM Analysis will use peaks from zerocrossing_analysis if available
-    
-
-    
-
     
     if zerocrossing_analysis:
         # Calculate mean crossings (already have data_centered)
@@ -122,11 +130,11 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
         # Use 0.5 times the mean period as minimum peak distance
         if mean_period_samples > 0:
             min_peak_distance = int(0.5 * mean_period_samples)
-            logger.info(f"Using peak distance of {min_peak_distance} samples (0.5 × mean period of {mean_period_samples} samples)")
+            logger.debug(f"Using peak distance of {min_peak_distance} samples (0.5 × mean period of {mean_period_samples} samples)")
         else:
             # Fallback to user-provided or default value
             min_peak_distance = peak_distance
-            logger.info(f"No valid mean period, using default peak distance of {min_peak_distance} samples")
+            logger.debug(f"No valid mean period, using default peak distance of {min_peak_distance} samples")
         
         # Find peaks and troughs on original data with appropriate distance constraint
         peaks, _ = signal.find_peaks(data_scaled, distance=min_peak_distance)
@@ -197,10 +205,10 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
                 
                 # Use zero-crossing method if it provides more complete analysis
                 if len(wave_amplitudes) > 0:
-                    logger.info(f"Using zero-crossing method for double amplitude calculation ({len(wave_amplitudes)} waves)")
+                    logger.debug(f"Using zero-crossing method for double amplitude calculation ({len(wave_amplitudes)} waves)")
                     double_amplitudes = wave_amplitudes
                 elif len(double_amplitudes) > 0:
-                    logger.info(f"Using trough-peak-trough method for double amplitude calculation ({len(double_amplitudes)} waves)")
+                    logger.debug(f"Using trough-peak-trough method for double amplitude calculation ({len(double_amplitudes)} waves)")
             
             if len(double_amplitudes) > 0:
                 results['maximum_double_amplitude'] = np.max(double_amplitudes)
@@ -211,85 +219,433 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
                 n_significant = max(1, int(n_waves * significant_percentile / 100))
                 results['sign_double_amplitude'] = np.mean(sorted_amps[:n_significant])
                 
-                logger.info(f"Calculated significant double amplitude from {n_significant} highest waves")
-                
-            # MPM Analysis using centered data with Peak Over Threshold (POT) method
+                logger.debug(f"Calculated significant double amplitude from {n_significant} highest waves")
+    
+    # Calculate irregularity factor (STD / mean zero-crossing period)
+    if results['mean_zerocross_period'] > 0:
+        results['irregularity_factor'] = std_val / results['mean_zerocross_period']
+    else:
+        results['irregularity_factor'] = np.nan
+    
+    # Calculate crest factor (max deviation from mean / STD)
+    if std_val > 0:
+        max_deviation = max(abs(max_val - mean_val), abs(min_val - mean_val))
+        results['crest_factor'] = max_deviation / std_val
+    else:
+        results['crest_factor'] = np.nan
+    
+    logger.debug(f"Calculated parameters: irregularity_factor={results['irregularity_factor']:.3f}, crest_factor={results['crest_factor']:.3f}")
+    
+    # MPM Analysis using selected method
+    if mpm_method == 'STD':
+        # Simplified method based on standard deviation (assumes narrow-band process)
+        # MPM = mean + sqrt(2) * STD * sqrt(ln(N))
+        # where N is the number of waves/cycles
+        
+        # Calculate number of waves/cycles
+        if results['zero_upcross'] > 0:
+            N_waves = results['zero_upcross']
+        else:
+            # Estimate from data length and mean period if available
+            if data_duration_hours is not None and results['mean_zerocross_period'] > 0:
+                N_waves = int(data_duration_hours * 3600 / results['mean_zerocross_period'])
+            else:
+                # Fallback: estimate from data length
+                N_waves = len(data_scaled) // 100  # Rough estimate
+        
+        if N_waves > 1:
+            # Separate positive and negative data for individual STD calculation
+            # Using centered data for proper separation
+            positive_data = data_centered[data_centered > 0]
+            negative_data = -data_centered[data_centered < 0]  # Convert to positive for STD calculation
+            
+            # Calculate separate standard deviations for positive and negative data
+            std_positive = np.std(positive_data) if len(positive_data) > 0 else std_val
+            std_negative = np.std(negative_data) if len(negative_data) > 0 else std_val
+            
+            logger.debug(f"STD method: std_total={std_val:.3f}, std_positive={std_positive:.3f}, std_negative={std_negative:.3f}")
+            
+            # Calculate significant amplitudes if peaks are available
             if len(peaks) > 0:
-                # Extract positive peaks from centered data
+                # Positive peaks
                 positive_peaks = data_centered[peaks]
                 positive_peaks = positive_peaks[positive_peaks > 0]
-                
-                # Apply Peak Over Threshold (POT) method
-                # Set threshold at 1.5 times standard deviation (commonly used in practice)
-                threshold_pos = pot_threshold_factor * std_val
-                peaks_over_threshold = positive_peaks[positive_peaks > threshold_pos]
-                
-                logger.info(f"Positive peaks: {len(positive_peaks)} total, {len(peaks_over_threshold)} over threshold ({threshold_pos:.3f})")
-                
-                # Fit Weibull to peaks over threshold if enough data points exist
-                if len(peaks_over_threshold) >= 10:
+                if len(positive_peaks) > 0:
+                    sorted_pos_peaks = np.sort(positive_peaks)[::-1]
+                    n_significant_pos = max(1, int(len(positive_peaks) * significant_percentile / 100))
+                    results['pos_sign_amplitude'] = mean_val + np.mean(sorted_pos_peaks[:n_significant_pos])
+                    
+            if len(troughs) > 0:
+                # Negative peaks
+                negative_peaks = data_centered[troughs]
+                negative_peaks_abs = -negative_peaks[negative_peaks < 0]
+                if len(negative_peaks_abs) > 0:
+                    sorted_neg_peaks = np.sort(negative_peaks_abs)[::-1]
+                    n_significant_neg = max(1, int(len(negative_peaks_abs) * significant_percentile / 100))
+                    results['neg_sign_amplitude'] = mean_val - np.mean(sorted_neg_peaks[:n_significant_neg])
+            
+            # Calculate MPM using Rice distribution formulas with separate STDs
+            # For narrow-band processes, using spectral width parameter epsilon
+            # If epsilon = 0 (narrow band), the distribution reduces to Rayleigh
+            
+            # Estimate spectral width parameter epsilon (for narrow-band assumption, epsilon ≈ 0)
+            # This implementation assumes narrow-band process (epsilon = 0)
+            
+            # Calculate sqrt(ln(N)) for both positive and negative
+            sqrt_ln_N = np.sqrt(np.log(N_waves))
+            
+            # Positive MPM (using positive STD)
+            # X_max = mean + sqrt(2 * sigma_x^2) * sqrt(ln(Ne)) [B.80]
+            # For narrow band: X_max ≈ mean + sqrt(2) * sigma_x * sqrt(ln(N))
+            results['mpm_pos'] = mean_val + np.sqrt(2) * std_positive * sqrt_ln_N
+            
+            # EEV correction for positive (using positive STD)
+            # For STD method, EEV includes a small correction based on Euler-Mascheroni constant
+            # EEV ≈ MPM + γ * std / sqrt(2 * ln(N))
+            eev_correction_pos = GAMMA * std_positive / np.sqrt(2 * np.log(N_waves))
+            results['eev_pos'] = results['mpm_pos'] + eev_correction_pos
+            
+            # Negative MPM (using negative STD)
+            # X_min = mean - sqrt(2 * sigma_x^2) * sqrt(ln(Ne)) [B.81]
+            # For narrow band: X_min ≈ mean - sqrt(2) * sigma_x * sqrt(ln(N))
+            results['mpm_neg'] = mean_val - np.sqrt(2) * std_negative * sqrt_ln_N
+            
+            # EEV correction for negative (using negative STD)
+            eev_correction_neg = GAMMA * std_negative / np.sqrt(2 * np.log(N_waves))
+            results['eev_neg'] = results['mpm_neg'] - eev_correction_neg
+            
+            logger.debug(f"STD method: N_waves={N_waves}, MPM_pos={results['mpm_pos']:.3f}, EEV_pos={results['eev_pos']:.3f}")
+            logger.debug(f"STD method: MPM_neg={results['mpm_neg']:.3f}, EEV_neg={results['eev_neg']:.3f}")
+        else:
+            logger.warning("STD method: Not enough waves for MPM calculation")
+            
+    elif mpm_method == 'POT':
+        # Peak Over Threshold method with Weibull distribution fitting
+        # Following the standard procedure from the image:
+        # 1. Extract all peaks (not just those over threshold)
+        # 2. Use Weibull plotting position for cumulative probability
+        # 3. Fit both Rayleigh and Weibull distributions using linear regression
+        # 4. Calculate MPM based on EVD theory
+        
+        if len(peaks) > 0:
+            # Extract positive peaks from centered data
+            positive_peaks = data_centered[peaks]
+            positive_peaks = positive_peaks[positive_peaks > 0]
+            
+            # Calculate positive significant amplitude (mean of highest 1/3 peaks)
+            if len(positive_peaks) > 0:
+                sorted_pos_peaks = np.sort(positive_peaks)[::-1]  # Sort descending
+                n_significant_pos = max(1, int(len(positive_peaks) * significant_percentile / 100))
+                results['pos_sign_amplitude'] = mean_val + np.mean(sorted_pos_peaks[:n_significant_pos])
+                logger.debug(f"Calculated positive significant amplitude from {n_significant_pos} highest peaks: {results['pos_sign_amplitude']:.3f}")
+            
+            # Apply improved Weibull analysis to all positive peaks
+            if len(positive_peaks) >= 10:
+                try:
+                    # Select only the largest 10% of peaks for extreme value analysis
+                    n_extreme = max(int(0.1 * len(positive_peaks)), 10)  # At least 10 peaks
+                    sorted_all_peaks = np.sort(positive_peaks)[::-1]  # Sort descending
+                    extreme_peaks = sorted_all_peaks[:n_extreme]  # Take largest 10%
+                    
+                    logger.debug(f"Analyzing largest {n_extreme} positive peaks ({100*n_extreme/len(positive_peaks):.1f}%) for extreme value fitting")
+                    
+                    # Sort peaks in ascending order for distribution fitting
+                    sorted_peaks = np.sort(extreme_peaks)
+                    n_peaks = len(sorted_peaks)
+                    
+                    # Calculate cumulative probability using Weibull plotting position
+                    j_values = np.arange(1, n_peaks + 1)
+                    P_empirical = j_values / (n_peaks + 1)
+                    
+                    # 1. Fit Rayleigh distribution
+                    valid_idx = P_empirical < 0.999
+                    Y_rayleigh = -np.log(1 - P_empirical[valid_idx])
+                    X_rayleigh = sorted_peaks[valid_idx]**2
+                    
+                    a_rayleigh = np.sum(X_rayleigh * Y_rayleigh) / np.sum(X_rayleigh**2)
+                    sigma_R = np.sqrt(1 / (2 * a_rayleigh))
+                    
+                    logger.debug(f"Positive Rayleigh fit (10% largest): σR = {sigma_R:.3f}")
+                    
+                    # 2. Fit Weibull distribution with location parameter
+                    best_r2 = -np.inf
+                    best_params = None
+                    
+                    for mu_factor in [0.0, 0.5, 0.8, 0.9, 0.95]:
+                        mu_trial = mu_factor * sorted_peaks[0]
+                        
+                        if mu_trial >= sorted_peaks[0]:
+                            continue
+                            
+                        Y_weibull = np.log(-np.log(1 - P_empirical[valid_idx]))
+                        X_weibull = np.log(sorted_peaks[valid_idx] - mu_trial)
+                        
+                        k_trial, b_trial = np.polyfit(X_weibull, Y_weibull, 1)
+                        
+                        y_pred = k_trial * X_weibull + b_trial
+                        ss_res = np.sum((Y_weibull - y_pred)**2)
+                        ss_tot = np.sum((Y_weibull - np.mean(Y_weibull))**2)
+                        r2 = 1 - (ss_res / ss_tot)
+                        
+                        if r2 > best_r2:
+                            best_r2 = r2
+                            best_params = (mu_trial, k_trial, b_trial)
+                    
+                    if best_params is not None:
+                        mu_weibull, k_weibull, b_weibull = best_params
+                        sigma_w = np.exp(-b_weibull / k_weibull)
+                        logger.debug(f"Positive Weibull fit (10% largest): μ = {mu_weibull:.3f}, k = {k_weibull:.3f}, σw = {sigma_w:.3f}, R² = {best_r2:.3f}")
+                    else:
+                        mu_weibull = 0
+                        Y_weibull = np.log(-np.log(1 - P_empirical[valid_idx]))
+                        X_weibull = np.log(sorted_peaks[valid_idx])
+                        k_weibull, b_weibull = np.polyfit(X_weibull, Y_weibull, 1)
+                        sigma_w = np.exp(-b_weibull / k_weibull)
+                        logger.debug(f"Positive Weibull fit (10% largest, μ=0): k = {k_weibull:.3f}, σw = {sigma_w:.3f}")
+                    
+                    # 3. Calculate MPM based on EVD theory
+                    # Number of extreme peaks (10% largest)
+                    N = len(extreme_peaks)
+                    
+                    # For Weibull distribution, MPM is the value where PDF of EVD reaches maximum
+                    def weibull_evd_pdf(x, mu, sigma, k, n):
+                        """Calculate the PDF of extreme value distribution for Weibull"""
+                        if x <= mu:
+                            return 0.0
+                        u = (x - mu) / sigma
+                        if u <= 0:
+                            return 0.0
+                        
+                        # Components of the PDF
+                        cdf_base = 1 - np.exp(-u**k)
+                        pdf_base = k/sigma * u**(k-1) * np.exp(-u**k)
+                        
+                        # Complete PDF
+                        if cdf_base <= 0 or cdf_base >= 1:
+                            return 0.0
+                        
+                        pdf = n * cdf_base**(n-1) * pdf_base
+                        return pdf
+                    
+                    def negative_log_pdf(x, mu, sigma, k, n):
+                        """Negative log PDF for optimization (to find maximum)"""
+                        pdf = weibull_evd_pdf(x, mu, sigma, k, n)
+                        if pdf <= 0:
+                            return 1e10
+                        return -np.log(pdf)
+                    
+                    # Find MPM by minimizing negative log PDF
+                    # Initial guess: use the approximate formula
+                    x0 = mu_weibull + sigma_w * (np.log(N))**(1/k_weibull)
+                    
                     try:
-                        # Subtract threshold to get excesses over threshold
-                        excesses = peaks_over_threshold - threshold_pos
+                        from scipy.optimize import minimize_scalar
+                        # Search in a reasonable range around the initial guess
+                        bounds = (mu_weibull + 0.1*(x0-mu_weibull), 
+                                 mu_weibull + 3.0*(x0-mu_weibull))
                         
-                        # Fit Weibull distribution to excesses
-                        shape_pos, loc_pos, scale_pos = spstats.weibull_min.fit(excesses, floc=0)
-                        N_pos = len(peaks_over_threshold)
+                        result = minimize_scalar(negative_log_pdf, 
+                                               bounds=bounds,
+                                               method='bounded',
+                                               args=(mu_weibull, sigma_w, k_weibull, N))
                         
-                        # Calculate MPM for excesses
-                        mpm_excess = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos)
-                        expected_excess = loc_pos + scale_pos * (np.log(N_pos))**(1/shape_pos) + scale_pos * GAMMA * (np.log(N_pos))**(1/shape_pos - 1) / shape_pos
-                        
-                        # Add threshold and mean back for final results
-                        results['mpm_pos'] = mean_val + threshold_pos + mpm_excess
-                        results['expected_pos'] = mean_val + threshold_pos + expected_excess
-                        results['percent_increase_pos'] = (expected_excess - mpm_excess) / abs(mpm_excess) * 100 if mpm_excess != 0 else np.nan
-                        
-                        logger.info(f"MPM analysis completed for positive peaks (Weibull shape={shape_pos:.3f})")
+                        if result.success:
+                            mpm_pos_weibull = result.x - mu_weibull  # Subtract mu to get excess
+                            logger.debug(f"  MPM found at x={result.x:.3f} (exact method)")
+                        else:
+                            # Fallback to approximate formula
+                            mpm_pos_weibull = sigma_w * (np.log(N))**(1/k_weibull)
+                            logger.debug(f"  MPM calculation failed, using approximate formula")
                     except Exception as e:
-                        logger.warning(f"MPM analysis failed for positive peaks: {e}")
-                else:
-                    logger.warning(f"Too few positive peaks over threshold (< 10) for MPM analysis: {len(peaks_over_threshold)} peaks found")
-                
+                        # Fallback to approximate formula
+                        mpm_pos_weibull = sigma_w * (np.log(N))**(1/k_weibull)
+                        logger.debug(f"  MPM optimization error: {e}, using approximate formula")
+                    
+                    # For Rayleigh, the MPM is well-known:
+                    # MPM ≈ σR * sqrt(2*ln(N))
+                    mpm_pos_rayleigh = sigma_R * np.sqrt(2 * np.log(N))
+                    
+                    # Use Weibull MPM as the primary result
+                    results['mpm_pos'] = mean_val + mu_weibull + mpm_pos_weibull
+                    
+                    # Calculate EEV (Expected Extreme Value)
+                    # For Weibull: EEV includes the Euler-Mascheroni constant correction
+                    if k_weibull > 0:
+                        eev_correction = sigma_w * GAMMA * (np.log(N))**(1/k_weibull - 1) / k_weibull
+                    else:
+                        eev_correction = 0
+                    results['eev_pos'] = results['mpm_pos'] + eev_correction
+                    
+                    logger.debug(f"Positive peaks analysis completed (N={N} peaks):")
+                    logger.debug(f"  Weibull MPM: {mpm_pos_weibull:.3f}, Total MPM: {results['mpm_pos']:.3f}")
+                    logger.debug(f"  Rayleigh MPM: {mpm_pos_rayleigh:.3f}")
+                    logger.debug(f"  EEV: {results['eev_pos']:.3f}")
+                    
+                except Exception as e:
+                    logger.warning(f"Weibull/Rayleigh analysis failed for positive peaks: {e}")
+            else:
+                logger.warning(f"Too few positive peaks (< 10) for Weibull analysis: {len(positive_peaks)} peaks found")
+            
             if len(troughs) > 0:
                 # Extract negative peaks from centered data and convert to positive values
                 negative_peaks = data_centered[troughs]
                 negative_peaks = negative_peaks[negative_peaks < 0]
                 negative_peaks_abs = -negative_peaks  # Convert to positive for analysis
                 
-                # Apply Peak Over Threshold (POT) method
-                # Set threshold at 1.5 times standard deviation
-                threshold_neg = pot_threshold_factor * std_val
-                peaks_over_threshold_neg = negative_peaks_abs[negative_peaks_abs > threshold_neg]
+                # Calculate negative significant amplitude (mean of highest 1/3 peaks in absolute value)
+                if len(negative_peaks_abs) > 0:
+                    sorted_neg_peaks = np.sort(negative_peaks_abs)[::-1]  # Sort descending
+                    n_significant_neg = max(1, int(len(negative_peaks_abs) * significant_percentile / 100))
+                    results['neg_sign_amplitude'] = mean_val - np.mean(sorted_neg_peaks[:n_significant_neg])
+                    logger.debug(f"Calculated negative significant amplitude from {n_significant_neg} highest peaks: {results['neg_sign_amplitude']:.3f}")
                 
-                logger.info(f"Negative peaks: {len(negative_peaks_abs)} total, {len(peaks_over_threshold_neg)} over threshold ({threshold_neg:.3f})")
-                
-                # Fit Weibull to peaks over threshold if enough data points exist
-                if len(peaks_over_threshold_neg) >= 10:
+            # Apply improved Weibull analysis to all negative peaks
+            if len(negative_peaks_abs) >= 10:
+                try:
+                    # Select only the largest 10% of peaks for extreme value analysis
+                    n_extreme = max(int(0.1 * len(negative_peaks_abs)), 10)  # At least 10 peaks
+                    sorted_all_peaks = np.sort(negative_peaks_abs)[::-1]  # Sort descending
+                    extreme_peaks = sorted_all_peaks[:n_extreme]  # Take largest 10%
+                    
+                    logger.debug(f"Analyzing largest {n_extreme} negative peaks ({100*n_extreme/len(negative_peaks_abs):.1f}%) for extreme value fitting")
+                    
+                    # Sort peaks in ascending order for distribution fitting
+                    sorted_peaks = np.sort(extreme_peaks)
+                    n_peaks = len(sorted_peaks)
+                    
+                    # Calculate cumulative probability using Weibull plotting position
+                    j_values = np.arange(1, n_peaks + 1)
+                    P_empirical = j_values / (n_peaks + 1)
+                    
+                    # 1. Fit Rayleigh distribution
+                    valid_idx = P_empirical < 0.999
+                    Y_rayleigh = -np.log(1 - P_empirical[valid_idx])
+                    X_rayleigh = sorted_peaks[valid_idx]**2
+                    
+                    a_rayleigh = np.sum(X_rayleigh * Y_rayleigh) / np.sum(X_rayleigh**2)
+                    sigma_R = np.sqrt(1 / (2 * a_rayleigh))
+                    
+                    logger.debug(f"Negative Rayleigh fit (10% largest): σR = {sigma_R:.3f}")
+                    
+                    # 2. Fit Weibull distribution with location parameter
+                    best_r2 = -np.inf
+                    best_params = None
+                    
+                    for mu_factor in [0.0, 0.5, 0.8, 0.9, 0.95]:
+                        mu_trial = mu_factor * sorted_peaks[0]
+                        
+                        if mu_trial >= sorted_peaks[0]:
+                            continue
+                            
+                        Y_weibull = np.log(-np.log(1 - P_empirical[valid_idx]))
+                        X_weibull = np.log(sorted_peaks[valid_idx] - mu_trial)
+                        
+                        k_trial, b_trial = np.polyfit(X_weibull, Y_weibull, 1)
+                        
+                        y_pred = k_trial * X_weibull + b_trial
+                        ss_res = np.sum((Y_weibull - y_pred)**2)
+                        ss_tot = np.sum((Y_weibull - np.mean(Y_weibull))**2)
+                        r2 = 1 - (ss_res / ss_tot)
+                        
+                        if r2 > best_r2:
+                            best_r2 = r2
+                            best_params = (mu_trial, k_trial, b_trial)
+                    
+                    if best_params is not None:
+                        mu_weibull, k_weibull, b_weibull = best_params
+                        sigma_w = np.exp(-b_weibull / k_weibull)
+                        logger.debug(f"Negative Weibull fit (10% largest): μ = {mu_weibull:.3f}, k = {k_weibull:.3f}, σw = {sigma_w:.3f}, R² = {best_r2:.3f}")
+                    else:
+                        mu_weibull = 0
+                        Y_weibull = np.log(-np.log(1 - P_empirical[valid_idx]))
+                        X_weibull = np.log(sorted_peaks[valid_idx])
+                        k_weibull, b_weibull = np.polyfit(X_weibull, Y_weibull, 1)
+                        sigma_w = np.exp(-b_weibull / k_weibull)
+                        logger.debug(f"Negative Weibull fit (10% largest, μ=0): k = {k_weibull:.3f}, σw = {sigma_w:.3f}")
+                    
+                    # 3. Calculate MPM based on EVD theory
+                    # Number of extreme peaks (10% largest)
+                    N = len(extreme_peaks)
+                    
+                    # For Weibull distribution, MPM is the value where PDF of EVD reaches maximum
+                    def weibull_evd_pdf(x, mu, sigma, k, n):
+                        """Calculate the PDF of extreme value distribution for Weibull"""
+                        if x <= mu:
+                            return 0.0
+                        u = (x - mu) / sigma
+                        if u <= 0:
+                            return 0.0
+                        
+                        # Components of the PDF
+                        cdf_base = 1 - np.exp(-u**k)
+                        pdf_base = k/sigma * u**(k-1) * np.exp(-u**k)
+                        
+                        # Complete PDF
+                        if cdf_base <= 0 or cdf_base >= 1:
+                            return 0.0
+                        
+                        pdf = n * cdf_base**(n-1) * pdf_base
+                        return pdf
+                    
+                    def negative_log_pdf(x, mu, sigma, k, n):
+                        """Negative log PDF for optimization (to find maximum)"""
+                        pdf = weibull_evd_pdf(x, mu, sigma, k, n)
+                        if pdf <= 0:
+                            return 1e10
+                        return -np.log(pdf)
+                    
+                    # Find MPM by minimizing negative log PDF
+                    # Initial guess: use the approximate formula
+                    x0 = mu_weibull + sigma_w * (np.log(N))**(1/k_weibull)
+                    
                     try:
-                        # Subtract threshold to get excesses over threshold
-                        excesses = peaks_over_threshold_neg - threshold_neg
+                        from scipy.optimize import minimize_scalar
+                        # Search in a reasonable range around the initial guess
+                        bounds = (mu_weibull + 0.1*(x0-mu_weibull), 
+                                 mu_weibull + 3.0*(x0-mu_weibull))
                         
-                        # Fit Weibull distribution to excesses
-                        shape_neg, loc_neg, scale_neg = spstats.weibull_min.fit(excesses, floc=0)
-                        N_neg = len(peaks_over_threshold_neg)
+                        result = minimize_scalar(negative_log_pdf, 
+                                               bounds=bounds,
+                                               method='bounded',
+                                               args=(mu_weibull, sigma_w, k_weibull, N))
                         
-                        # Calculate MPM for excesses
-                        mpm_excess = loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg)
-                        expected_excess = loc_neg + scale_neg * (np.log(N_neg))**(1/shape_neg) + scale_neg * GAMMA * (np.log(N_neg))**(1/shape_neg - 1) / shape_neg
-                        
-                        # Add threshold and mean back and negate for minimum values
-                        results['mpm_neg'] = mean_val - (threshold_neg + mpm_excess)
-                        results['expected_neg'] = mean_val - (threshold_neg + expected_excess)
-                        results['percent_increase_neg'] = (expected_excess - mpm_excess) / abs(mpm_excess) * 100 if mpm_excess != 0 else np.nan
-                        
-                        logger.info(f"MPM analysis completed for negative peaks (Weibull shape={shape_neg:.3f})")
+                        if result.success:
+                            mpm_neg_weibull = result.x - mu_weibull  # Subtract mu to get excess
+                            logger.debug(f"  MPM found at x={result.x:.3f} (exact method)")
+                        else:
+                            # Fallback to approximate formula
+                            mpm_neg_weibull = sigma_w * (np.log(N))**(1/k_weibull)
+                            logger.debug(f"  MPM calculation failed, using approximate formula")
                     except Exception as e:
-                        logger.warning(f"MPM analysis failed for negative peaks: {e}")
-                else:
-                    logger.warning(f"Too few negative peaks over threshold (< 10) for MPM analysis: {len(peaks_over_threshold_neg)} peaks found")
-    
-
+                        # Fallback to approximate formula
+                        mpm_neg_weibull = sigma_w * (np.log(N))**(1/k_weibull)
+                        logger.debug(f"  MPM optimization error: {e}, using approximate formula")
+                    
+                    # For Rayleigh, the MPM is well-known:
+                    # MPM ≈ σR * sqrt(2*ln(N))
+                    mpm_neg_rayleigh = sigma_R * np.sqrt(2 * np.log(N))
+                    
+                    # Use Weibull MPM as the primary result (negative direction)
+                    results['mpm_neg'] = mean_val - (mu_weibull + mpm_neg_weibull)
+                    
+                    # Calculate EEV
+                    if k_weibull > 0:
+                        eev_correction = sigma_w * GAMMA * (np.log(N))**(1/k_weibull - 1) / k_weibull
+                    else:
+                        eev_correction = 0
+                    results['eev_neg'] = mean_val - (mu_weibull + mpm_neg_weibull + eev_correction)
+                    
+                    logger.debug(f"Negative peaks analysis completed (N={N} peaks):")
+                    logger.debug(f"  Weibull MPM: {mpm_neg_weibull:.3f}, Total MPM: {results['mpm_neg']:.3f}")
+                    logger.debug(f"  Rayleigh MPM: {mpm_neg_rayleigh:.3f}")
+                    logger.debug(f"  EEV: {results['eev_neg']:.3f}")
+                    
+                except Exception as e:
+                    logger.warning(f"Weibull/Rayleigh analysis failed for negative peaks: {e}")
+            else:
+                logger.warning(f"Too few negative peaks (< 10) for Weibull analysis: {len(negative_peaks_abs)} peaks found")
+    else:
+        logger.error(f"Unknown MPM method: {mpm_method}. Using default values.")
     
     return results
 
@@ -297,7 +653,8 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                   lam=None, rho=1.025, g=9.807, header_text=None, include_charts=False, 
                   significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
                   zerocrossing_analysis=True, amplitude_analysis=True, 
-                  cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5):
+                  cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,
+                  mpm_method='POT'):
     """
     为PyDAS对象的所有通道生成详细的Excel分析报告，包括高低频分离分析
     
@@ -336,8 +693,13 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
     peak_distance : int, default=130
         峰值检测的最小距离参数，用于 Weibull 分析中的峰值检测
     pot_threshold_factor : float, default=1.5
-        峰值超阈值（POT）方法的阈值系数，阈值 = pot_threshold_factor × 标准差
+        峰值超阈值（POT）方法的阈值系数
+        实际阈值 = pot_threshold_factor × 标准差 / √2（考虑单侧分布）
         常用值：1.0（激进）、1.5（适中）、2.0（保守）
+    mpm_method : str, default='POT'
+        MPM（最可能最大值）的计算方法
+        - 'POT': 峰值超阈值方法，使用Weibull分布拟合（默认，更精确但计算复杂）
+        - 'STD': 基于标准差的简化方法（假设窄带过程，适用于线性波浪）
         
     Returns
     -------
@@ -385,8 +747,8 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         'channel\nID', 'Name', 'unit', 'number\nof zero\nupcross', 
         'maximum', 'minimum', 'mean', 'STD',
         'maximum\ndouble\namplitude', 'sign.\ndouble\namplitude', 
-        'MPM_pos', 'MPM_neg', 'expected_pos', 'expected_neg',
-        'inc_pos_%', 'inc_neg_%',
+        'Pos. sign.\namplitude', 'Neg. sign.\namplitude',
+        'MPM_pos', 'MPM_neg', 'EEV_pos', 'EEV_neg', 'irregularity\nfactor', 'crest\nfactor',
         'mean\nzerocro.\nperiod'
     ]
     
@@ -423,21 +785,21 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             data_scaled, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
             data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
-            pot_threshold_factor=pot_threshold_factor
+            pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
         )
         
         results_low_ch = analyze_channel_data(
             data_low, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
             data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
-            pot_threshold_factor=pot_threshold_factor
+            pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
         )
         
         results_high_ch = analyze_channel_data(
             data_high, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
             data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
-            pot_threshold_factor=pot_threshold_factor
+            pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
         )
         
         # 将结果添加到相应的DataFrame
@@ -447,9 +809,10 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_total_ch['mean'], results_total_ch['STD'],
             results_total_ch['maximum_double_amplitude'],
             results_total_ch['sign_double_amplitude'],
-            results_total_ch['mpm_pos'], results_total_ch['mpm_neg'], 
-            results_total_ch['expected_pos'], results_total_ch['expected_neg'],
-            results_total_ch['percent_increase_pos'], results_total_ch['percent_increase_neg'],
+            results_total_ch['pos_sign_amplitude'], results_total_ch['neg_sign_amplitude'],
+            results_total_ch['mpm_pos'], results_total_ch['mpm_neg'],
+            results_total_ch['eev_pos'], results_total_ch['eev_neg'],
+            results_total_ch['irregularity_factor'], results_total_ch['crest_factor'],
             results_total_ch['mean_zerocross_period']
         ]
         
@@ -459,9 +822,10 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_low_ch['mean'], results_low_ch['STD'],
             results_low_ch['maximum_double_amplitude'],
             results_low_ch['sign_double_amplitude'],
-            results_low_ch['mpm_pos'], results_low_ch['mpm_neg'], 
-            results_low_ch['expected_pos'], results_low_ch['expected_neg'],
-            results_low_ch['percent_increase_pos'], results_low_ch['percent_increase_neg'],
+            results_low_ch['pos_sign_amplitude'], results_low_ch['neg_sign_amplitude'],
+            results_low_ch['mpm_pos'], results_low_ch['mpm_neg'],
+            results_low_ch['eev_pos'], results_low_ch['eev_neg'],
+            results_low_ch['irregularity_factor'], results_low_ch['crest_factor'],
             results_low_ch['mean_zerocross_period']
         ]
         
@@ -471,9 +835,10 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_high_ch['mean'], results_high_ch['STD'],
             results_high_ch['maximum_double_amplitude'],
             results_high_ch['sign_double_amplitude'],
-            results_high_ch['mpm_pos'], results_high_ch['mpm_neg'], 
-            results_high_ch['expected_pos'], results_high_ch['expected_neg'],
-            results_high_ch['percent_increase_pos'], results_high_ch['percent_increase_neg'],
+            results_high_ch['pos_sign_amplitude'], results_high_ch['neg_sign_amplitude'],
+            results_high_ch['mpm_pos'], results_high_ch['mpm_neg'],
+            results_high_ch['eev_pos'], results_high_ch['eev_neg'],
+            results_high_ch['irregularity_factor'], results_high_ch['crest_factor'],
             results_high_ch['mean_zerocross_period']
         ]
 
@@ -571,13 +936,15 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                             4: 10,  # 零上穿数
                             9: 15,  # 最大双振幅
                             10: 15, # 显著双振幅
-                            11: 12, # MPM_pos
-                            12: 12, # MPM_neg
-                            13: 14, # expected_pos
-                            14: 14, # expected_neg
-                            15: 12, # inc_pos_%
-                            16: 12, # inc_neg_%
-                            17: 12  # 平均零上穿周期
+                            11: 12, # Pos. sign. amplitude
+                            12: 12, # Neg. sign. amplitude
+                            13: 12, # MPM_pos
+                            14: 12, # MPM_neg
+                            15: 10, # EEV_pos
+                            16: 10, # EEV_neg
+                            17: 12, # irregularity factor
+                            18: 10, # crest factor
+                            19: 12  # 平均零上穿周期
                         }
                         
                         for i in range(1, ws.max_column + 1):
@@ -599,7 +966,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             logger.error(f"Error exporting Excel file: {str(e)}")
     
     # 返回所有结果DataFrame
-    return results_total, results_low, results_high 
+    return None 
 
 def wave_report(pydas_obj, ch_name, sseg=0, save_path=None, title=None, L=1024,
                 Hs=None, Tp=None, gamma=None, bins=50, fullscale=False, lam=None, 

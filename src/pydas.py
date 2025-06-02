@@ -2608,7 +2608,7 @@ class PyDAS:
                       lam=None, rho=1.025, g=9.807, header_text=None, include_charts=True, 
                       significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
                       zerocrossing_analysis=True, amplitude_analysis=True, 
-                      cutoffperiod=15.0, peak_distance=10):
+                      cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,mpm_method='POT'):
         """
         为PyDAS对象的所有通道生成详细的Excel分析报告
         
@@ -2679,7 +2679,9 @@ class PyDAS:
             zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis,
             cutoffperiod=cutoffperiod,
-            peak_distance=peak_distance
+            peak_distance=peak_distance,
+            pot_threshold_factor=pot_threshold_factor,
+            mpm_method=mpm_method
         )
 
     def print_statistics(self, printTxt=False, printExcel=False):

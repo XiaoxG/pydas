@@ -365,7 +365,7 @@ def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization
             unit = pydas_obj.chInfo.loc[ch_idx, 'Unit']
             
             # 获取单位转换字典以确定转换后的单位
-            from utils import get_default_transDict, findtrans
+            from .utils import get_default_transDict, findtrans
             transDict = get_default_transDict(g)
             trans_temp = findtrans(unit, transDict)
             if trans_temp and trans_temp[0]:
