@@ -654,7 +654,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                   significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
                   zerocrossing_analysis=True, amplitude_analysis=True, 
                   cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,
-                  mpm_method='POT'):
+                  mpm_method='POT', frequency_separation=False):
     """
     为PyDAS对象的所有通道生成详细的Excel分析报告，包括高低频分离分析
     
@@ -700,11 +700,15 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         MPM（最可能最大值）的计算方法
         - 'POT': 峰值超阈值方法，使用Weibull分布拟合（默认，更精确但计算复杂）
         - 'STD': 基于标准差的简化方法（假设窄带过程，适用于线性波浪）
+    frequency_separation : bool, default=False
+        是否进行高低频分离分析。如果为True，将分别分析总体、低频（T>cutoffperiod）
+        和高频（T<cutoffperiod）成分；如果为False，只分析总体数据
         
     Returns
     -------
-    tuple of pandas.DataFrame
-        包含三个 DataFrame 的元组：(总统计, 低频统计, 高频统计)
+    tuple of pandas.DataFrame or pandas.DataFrame
+        - 如果frequency_separation=True：返回包含三个DataFrame的元组(总统计, 低频统计, 高频统计)
+        - 如果frequency_separation=False：只返回总统计的DataFrame
         
     Notes
     -----
@@ -752,10 +756,13 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         'mean\nzerocro.\nperiod'
     ]
     
-    # 创建三个结果DataFrame
+    # 创建结果DataFrame
     results_total = pd.DataFrame(columns=columns)
-    results_low = pd.DataFrame(columns=columns)
-    results_high = pd.DataFrame(columns=columns)
+    
+    # 只在需要时创建高低频结果DataFrame
+    if frequency_separation:
+        results_low = pd.DataFrame(columns=columns)
+        results_high = pd.DataFrame(columns=columns)
     
     # 获取通道信息
     ch_info = pydas_analysis.chInfo
@@ -776,11 +783,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         # 获取原始数据
         data_scaled = pydas_analysis.data[sseg][ch_name].values
         
-        # 分离高低频
-        data_low = pydas_analysis.apply_lowpass_filter(ch_name, cutoff_freq, returnValue=True)
-        data_high = pydas_analysis.apply_highpass_filter(ch_name, cutoff_freq, returnValue=True)
-        
-        # 分析三组数据
+        # 分析总体数据
         results_total_ch = analyze_channel_data(
             data_scaled, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
@@ -788,21 +791,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
         )
         
-        results_low_ch = analyze_channel_data(
-            data_low, zerocrossing_analysis=zerocrossing_analysis,
-            amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
-            pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
-        )
-        
-        results_high_ch = analyze_channel_data(
-            data_high, zerocrossing_analysis=zerocrossing_analysis,
-            amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
-            pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
-        )
-        
-        # 将结果添加到相应的DataFrame
+        # 将结果添加到总体DataFrame
         results_total.loc[ch_idx] = [
             ch_idx, ch_name, ch_unit, results_total_ch['zero_upcross'],
             results_total_ch['maximum'], results_total_ch['minimum'],
@@ -816,44 +805,75 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_total_ch['mean_zerocross_period']
         ]
         
-        results_low.loc[ch_idx] = [
-            ch_idx, ch_name, ch_unit, results_low_ch['zero_upcross'],
-            results_low_ch['maximum'], results_low_ch['minimum'],
-            results_low_ch['mean'], results_low_ch['STD'],
-            results_low_ch['maximum_double_amplitude'],
-            results_low_ch['sign_double_amplitude'],
-            results_low_ch['pos_sign_amplitude'], results_low_ch['neg_sign_amplitude'],
-            results_low_ch['mpm_pos'], results_low_ch['mpm_neg'],
-            results_low_ch['eev_pos'], results_low_ch['eev_neg'],
-            results_low_ch['irregularity_factor'], results_low_ch['crest_factor'],
-            results_low_ch['mean_zerocross_period']
-        ]
-        
-        results_high.loc[ch_idx] = [
-            ch_idx, ch_name, ch_unit, results_high_ch['zero_upcross'],
-            results_high_ch['maximum'], results_high_ch['minimum'],
-            results_high_ch['mean'], results_high_ch['STD'],
-            results_high_ch['maximum_double_amplitude'],
-            results_high_ch['sign_double_amplitude'],
-            results_high_ch['pos_sign_amplitude'], results_high_ch['neg_sign_amplitude'],
-            results_high_ch['mpm_pos'], results_high_ch['mpm_neg'],
-            results_high_ch['eev_pos'], results_high_ch['eev_neg'],
-            results_high_ch['irregularity_factor'], results_high_ch['crest_factor'],
-            results_high_ch['mean_zerocross_period']
-        ]
+        # 只在需要时进行高低频分离分析
+        if frequency_separation:
+            # 分离高低频
+            data_low = pydas_analysis.apply_lowpass_filter(ch_name, cutoff_freq, returnValue=True)
+            data_high = pydas_analysis.apply_highpass_filter(ch_name, cutoff_freq, returnValue=True)
+            
+            # 分析低频数据
+            results_low_ch = analyze_channel_data(
+                data_low, zerocrossing_analysis=zerocrossing_analysis,
+                amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
+                data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
+                pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
+            )
+            
+            # 分析高频数据
+            results_high_ch = analyze_channel_data(
+                data_high, zerocrossing_analysis=zerocrossing_analysis,
+                amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
+                data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
+                pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
+            )
+            
+            # 将结果添加到相应的DataFrame
+            results_low.loc[ch_idx] = [
+                ch_idx, ch_name, ch_unit, results_low_ch['zero_upcross'],
+                results_low_ch['maximum'], results_low_ch['minimum'],
+                results_low_ch['mean'], results_low_ch['STD'],
+                results_low_ch['maximum_double_amplitude'],
+                results_low_ch['sign_double_amplitude'],
+                results_low_ch['pos_sign_amplitude'], results_low_ch['neg_sign_amplitude'],
+                results_low_ch['mpm_pos'], results_low_ch['mpm_neg'],
+                results_low_ch['eev_pos'], results_low_ch['eev_neg'],
+                results_low_ch['irregularity_factor'], results_low_ch['crest_factor'],
+                results_low_ch['mean_zerocross_period']
+            ]
+            
+            results_high.loc[ch_idx] = [
+                ch_idx, ch_name, ch_unit, results_high_ch['zero_upcross'],
+                results_high_ch['maximum'], results_high_ch['minimum'],
+                results_high_ch['mean'], results_high_ch['STD'],
+                results_high_ch['maximum_double_amplitude'],
+                results_high_ch['sign_double_amplitude'],
+                results_high_ch['pos_sign_amplitude'], results_high_ch['neg_sign_amplitude'],
+                results_high_ch['mpm_pos'], results_high_ch['mpm_neg'],
+                results_high_ch['eev_pos'], results_high_ch['eev_neg'],
+                results_high_ch['irregularity_factor'], results_high_ch['crest_factor'],
+                results_high_ch['mean_zerocross_period']
+            ]
 
     # 创建Excel文件
     if output_file:
         try:
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                # 写入三个表
+                # 总是写入总体统计
                 results_total.to_excel(writer, sheet_name='Total Statistics', index=False)
-                results_low.to_excel(writer, sheet_name=f'Low Freq (T>{cutoffperiod}s)', index=False)
-                results_high.to_excel(writer, sheet_name=f'High Freq (T<{cutoffperiod}s)', index=False)
+                
+                # 只在进行频率分离时写入高低频统计
+                if frequency_separation:
+                    results_low.to_excel(writer, sheet_name=f'Low Freq (T>{cutoffperiod}s)', index=False)
+                    results_high.to_excel(writer, sheet_name=f'High Freq (T<{cutoffperiod}s)', index=False)
                 
                 if format_sheet:
-                    # 格式化三个表
-                    for sheet_name in ['Total Statistics', f'Low Freq (T>{cutoffperiod}s)', f'High Freq (T<{cutoffperiod}s)']:
+                    # 确定要格式化的表名列表
+                    sheet_names = ['Total Statistics']
+                    if frequency_separation:
+                        sheet_names.extend([f'Low Freq (T>{cutoffperiod}s)', f'High Freq (T<{cutoffperiod}s)'])
+                    
+                    # 格式化每个表
+                    for sheet_name in sheet_names:
                         ws = writer.sheets[sheet_name]
                         
                         # 添加标题行
@@ -965,8 +985,13 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         except Exception as e:
             logger.error(f"Error exporting Excel file: {str(e)}")
     
-    # 返回所有结果DataFrame
-    return None 
+    # 返回结果
+    if frequency_separation:
+        # 返回所有三个DataFrame
+        return results_total, results_low, results_high
+    else:
+        # 只返回总体统计DataFrame
+        return results_total
 
 def wave_report(pydas_obj, ch_name, sseg=0, save_path=None, title=None, L=1024,
                 Hs=None, Tp=None, gamma=None, bins=50, fullscale=False, lam=None, 
