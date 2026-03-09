@@ -26,3 +26,6 @@ ENV/
 test/result
 .DS_Store
 refs/
+GEMINI.md
+.out
+.tsv

@@ -4,23 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydas"
-version = "1.0.4"
+version = "1.1.0"
 authors = [
     {name = "SJTU/SKLOE", email = "xiaoxguo@sjtu.edu.cn"},
 ]
 description = "Python data analysis system, used for processing and analyzing large time series data @ SJTU/SKLOE"
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.11"
 keywords = ["data analysis", "time series", "signal processing", "ocean engineering", "spectral analysis"]
 license = {text = "MIT"}
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering",
@@ -57,6 +54,9 @@ dev = [
     "pytest>=6.0.0",
     "black>=21.5b2",
     "flake8>=3.9.0",
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.2.0",
+    "myst-parser>=1.0.0",
 ]
 performance = [
     "datashader>=0.14.0",
@@ -76,5 +76,6 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"*" = ["*.py"]
-"waveModel" = ["*.py"] 
+"pydas" = ["*.py"]
+"pydas.waveModel" = ["*.py"]
+"pydas.plot" = ["*.py"]

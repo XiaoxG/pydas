@@ -1,0 +1,40 @@
+# Python intermediate files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+.eggs/
+.mypy_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Data files (often large in ocean engineering)
+*.out
+*.dat
+*.mat
+*.csv
+*.xlsx
+*.feather
+*.parquet
+*.h5
+*.hdf5
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.cursor/
+
+# Project specific
+test/result/
+examples/*.html
+examples/*.png
