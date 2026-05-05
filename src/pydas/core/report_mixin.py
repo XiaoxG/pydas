@@ -103,59 +103,61 @@ class ReportMixin:
                       zerocrossing_analysis=True, amplitude_analysis=True, 
                       cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,mpm_method='POT'):
         """
-        为PyDAS对象的所有通道生成详细的Excel分析报告
-        
+        Generate a detailed Excel analysis report for all channels in this PyDAS object.
+
         Parameters
         ----------
         output_file : str, default='channel_report.xlsx'
-            输出Excel文件的路径
+            Path to the output Excel file.
         sseg : int, default=0
-            要分析的数据段索引
+            Index of the data segment to analyse.
         fullscale : bool, default=True
-            是否使用实际尺度（原型尺度）值
+            Whether to convert data to full (prototype) scale before analysis.
         lam : float, optional
-            尺度因子，仅在fullscale=True且PyDAS对象未设置__lam__属性时使用
+            Scale factor. Used only when ``fullscale=True`` and this object has no
+            ``__lam__`` attribute.
         rho : float, default=1.025
-            水密度 (kg/m³)，仅用于fullscale=True时
+            Water density in kg/m³. Used only when ``fullscale=True``.
         g : float, default=9.807
-            重力加速度 (m/s²)，仅用于fullscale=True时
+            Gravitational acceleration in m/s². Used only when ``fullscale=True``.
         header_text : str, optional
-            报告中的标题文本
+            Title text for the report. Auto-generated from the filename if *None*.
         include_charts : bool, default=True
-            是否在报告中包含图表
+            Whether to embed charts in the Excel report.
         significant_percentile : float, default=33.0
-            计算显著值的百分位数
+            Percentile used to compute significant values (e.g. 33 % → top 1/3).
         wave_analysis : bool, default=True
-            是否进行波浪分析
+            Whether to perform wave-by-wave analysis.
         format_sheet : bool, default=True
-            是否设置Excel格式
+            Whether to apply Excel formatting.
         zerocrossing_analysis : bool, default=True
-            是否进行过零分析
+            Whether to perform zero-crossing analysis.
         amplitude_analysis : bool, default=True
-            是否进行振幅分析
+            Whether to perform amplitude analysis.
         cutoffperiod : float, default=15.0
-            高低频分离的截止周期（秒），用于分离高频和低频成分
-        peak_distance : int, default=130
-            峰值检测的最小距离参数，用于 Weibull 分析中的峰值检测
-            
+            Cut-off period in seconds for separating low- and high-frequency components.
+        peak_distance : int, default=10
+            Minimum sample distance between peaks used in Weibull peak detection.
+
         Returns
         -------
-        tuple of pandas.DataFrame
-            包含三个 DataFrame 的元组：(总统计, 低频统计, 高频统计)
-            
+        pandas.DataFrame or tuple of pandas.DataFrame
+            Statistical results. See :func:`~pydas.reporting.channel_report` for details.
+
         Notes
         -----
-        - 生成一个包含所有通道统计分析的Excel报告
-        - 报告包括基本统计值、过零分析、振幅分析和极值估计
-        - 默认使用实际尺度值（原型尺度）
-        - 报告格式类似于标准海洋工程数据处理软件的输出
+        - Generates an Excel report with statistical analysis for every channel.
+        - Report includes basic statistics, zero-crossing analysis, amplitude analysis,
+          and extreme-value estimates.
+        - Produces full-scale (prototype-scale) values by default.
+        - Output format is compatible with standard ocean engineering data-processing tools.
         """
-        # 如果未提供lam但存在__lam__属性，使用对象的默认值
+        # Use the object's default scale factor if lam is not provided but __lam__ exists
         if fullscale and lam is None and hasattr(self, '__lam__'):
             lam = self.__lam__
-            logger.info(f"Using object's default scale factor: λ = {lam}")
+            logger.info(f"Using object's default scale factor: \u03bb = {lam}")
         
-        # 调用reporting模块中的channel_report函数
+        # Delegate to the standalone channel_report function in the reporting module
         return _channel_report(
             pydas_obj=self,
             output_file=output_file,
@@ -245,39 +247,40 @@ class ReportMixin:
                   Hs=None, Tp=None, gamma=None, bins=50, fullscale=True, lam=None, 
                   rho=1.025, g=9.807):
         """
-        生成波浪分析报告，包括时间序列、谱分析和峰值统计
-        
+        Generate a wave analysis report including time series, spectral analysis, and peak
+        statistics.
+
         Parameters
         ----------
         ch_name : str
-            要分析的通道名称
+            Name of the channel to analyse.
         sseg : int, optional
-            数据段索引，默认为0
+            Segment index, default is 0.
         save_path : str, optional
-            保存图片的路径，默认为None
+            Path to save the figure. If *None*, the figure is not saved.
         title : str, optional
-            图表标题，默认为None
+            Figure title. If *None*, no title is added.
         Hs : float, optional
-            JONSWAP谱的有效波高，默认为None
+            Significant wave height for a JONSWAP reference spectrum.
         Tp : float, optional
-            JONSWAP谱的峰值周期，默认为None
+            Peak period for the JONSWAP reference spectrum.
         gamma : float, optional
-            JONSWAP谱的峰值增强因子，默认为None
+            Peak enhancement factor for the JONSWAP spectrum. Defaults to 3.3.
         bins : int, optional
-            直方图的bin数量，默认为50
+            Number of histogram bins, default is 50.
         fullscale : bool, optional
-            是否使用实际尺度数据，默认为False
+            Whether to convert to full-scale data, default is *True*.
         lam : float, optional
-            尺度因子，默认为None
+            Scale factor. Inferred from ``self.__lam__`` when *None*.
         rho : float, optional
-            水密度 (kg/m3)，默认为1.025
+            Water density in kg/m³, default is 1.025.
         g : float, optional
-            重力加速度 (m/s2)，默认为9.807
-            
+            Gravitational acceleration in m/s², default is 9.807.
+
         Returns
         -------
         fig : matplotlib.figure.Figure
-            生成的图表对象
+            The generated figure object.
         """
         from ..reporting import wave_report
         return wave_report(self, ch_name, sseg, save_path, title, 

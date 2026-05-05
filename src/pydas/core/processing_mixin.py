@@ -35,15 +35,15 @@ class ProcessingMixin:
         - Validates unit conversion
         - Maintains data integrity
         """
-        # 检查通道名是否存在
+        # Validate channel name
         if chName not in self.chInfo['Name'].values:
             logger.warning(f"Channel '{chName}' does not exist.")
             return None
             
-        # 找到对应的索引
+        # Locate the row index for this channel
         idx = self.chInfo.index[self.chInfo['Name'] == chName].tolist()[0]
         
-        # 更新单位
+        # Update the unit field
         self.chInfo.loc[idx, 'Unit'] = newunit
         logger.info(f"Channel '{chName}' unit updated to: {newunit}")
         
@@ -90,8 +90,8 @@ class ProcessingMixin:
             # Get unit conversion dictionary using utility function
             transDict = get_default_transDict(g)
             
-            # Clear global trans cache to ensure fresh calculation
-            # 使用一个安全的字符串而不是空字符串
+            # Clear global unit-conversion cache to ensure a fresh calculation
+            # Use a safe non-empty string instead of an empty string
             findtrans('none', transDict, clear_cache=True)
             
             # Preprocess: batch get all unit conversions
@@ -132,7 +132,7 @@ class ProcessingMixin:
             
             # Update sampling rate
             self.__fs__ = self.__fs__ / np.sqrt(self.__lam__)
-            logger.info(f'lambda = {self.__lam__:2d}')
+            logger.info(f'lambda = {self.__lam__:.2f}')
             
             if pInfo:
                 logger.info(self.chInfo.to_string(justify='center'))
@@ -516,27 +516,27 @@ class ProcessingMixin:
         - Uses vectorized operations for performance
         """
         if chName == 'all':
-            # 使用pandas的优化方法一次性计算所有统计量
+            # Compute all channel statistics at once using pandas aggregation
             try:
-                # 获取数据帧
+                # Fetch the segment DataFrame
                 data_frame = self.data[sseg]
                 
-                # 检查数据大小，对于大型数据使用分块处理
-                if data_frame.shape[0] * data_frame.shape[1] > 10000000:  # 阈值可调整
-                    # 使用dask进行大数据并行计算
+                # Use chunked processing for large DataFrames (adjustable threshold)
+                if data_frame.shape[0] * data_frame.shape[1] > 10000000:
+                    # Prefer Dask for parallel computation on large data
                     try:
                         import dask.dataframe as dd
                         
-                        # 将pandas DataFrame转换为dask DataFrame
+                        # Convert pandas DataFrame to a Dask DataFrame
                         dask_df = dd.from_pandas(data_frame, npartitions=min(32, data_frame.shape[1]))
                         
-                        # 并行计算统计量
+                        # Compute statistics in parallel
                         mean_result = dask_df.mean().compute()
                         std_result = dask_df.std().compute()
                         max_result = dask_df.max().compute()
                         min_result = dask_df.min().compute()
                         
-                        # 创建结果DataFrame
+                        # Assemble the result DataFrame
                         stats = pd.DataFrame({
                             'Mean': mean_result,
                             'Std': std_result,
@@ -544,35 +544,35 @@ class ProcessingMixin:
                             'Min': min_result
                         })
                         
-                        # 添加单位列
+                        # Attach unit column
                         stats['Unit'] = self.chInfo.set_index('Name')['Unit']
                         
-                        # 更新统计信息
+                        # Store updated statistics
                         self.segStatis[sseg] = stats
                         
                     except ImportError:
-                        # 如果dask不可用，使用分块处理
+                        # Fall back to manual chunked processing if Dask is unavailable
                         logger.info("Dask not available, using chunked processing for large dataset")
                         
-                        # 分块大小
+                        # Chunk size in rows
                         chunk_size = 1000000 // data_frame.shape[1]
-                        chunk_size = max(chunk_size, 1000)  # 确保至少有1000行
+                        chunk_size = max(chunk_size, 1000)  # Guarantee at least 1000 rows per chunk
                         
-                        # 初始化结果
+                        # Initialise accumulators (Welford online algorithm)
                         means = pd.Series(index=data_frame.columns)
                         stds = pd.Series(index=data_frame.columns)
                         maxs = pd.Series(index=data_frame.columns)
                         mins = pd.Series(index=data_frame.columns)
                         
-                        # 分块处理
+                        # Chunk iteration
                         n_chunks = (data_frame.shape[0] + chunk_size - 1) // chunk_size
                         
-                        # 使用Welford算法进行在线计算均值和标准差
+                        # Welford online mean and variance
                         count = 0
                         M2 = pd.Series(0, index=data_frame.columns)
                         mean = pd.Series(0, index=data_frame.columns)
                         
-                        # 初始化最大最小值
+                        # Initialise min/max from first row
                         maxs = data_frame.iloc[0]
                         mins = data_frame.iloc[0]
                         
@@ -581,11 +581,11 @@ class ProcessingMixin:
                             end_idx = min((i + 1) * chunk_size, data_frame.shape[0])
                             chunk = data_frame.iloc[start_idx:end_idx]
                             
-                            # 更新最大最小值
+                            # Update running min/max
                             maxs = pd.concat([maxs, chunk.max()]).max(level=0)
                             mins = pd.concat([mins, chunk.min()]).min(level=0)
                             
-                            # 更新均值和方差（Welford算法）
+                            # Update mean and variance via Welford algorithm
                             for _, row in chunk.iterrows():
                                 count += 1
                                 delta = row - mean
@@ -593,11 +593,11 @@ class ProcessingMixin:
                                 delta2 = row - mean
                                 M2 += delta * delta2
                         
-                        # 计算标准差
+                        # Compute standard deviation
                         stds = np.sqrt(M2 / count)
                         means = mean
                         
-                        # 创建结果DataFrame
+                        # Assemble result DataFrame
                         stats = pd.DataFrame({
                             'Mean': means,
                             'Std': stds,
@@ -606,33 +606,32 @@ class ProcessingMixin:
                             'Unit': self.chInfo.set_index('Name')['Unit']
                         })
                         
-                        # 更新统计信息
+                        # Store updated statistics
                         self.segStatis[sseg] = stats
                 else:
-                    # 对于小型数据，使用pandas的优化方法
-                    # 并行计算统计量
+                    # Small DataFrame: use pandas aggregation directly
                     stats = data_frame.agg(['mean', 'std', 'max', 'min'])
                     
-                    # 转置结果，使其与所需格式匹配
+                    # Transpose to match the expected (channels × stats) layout
                     stats = stats.T
                     stats.columns = ['Mean', 'Std', 'Max', 'Min']
                     
-                    # 添加单位列
+                    # Attach unit column
                     stats['Unit'] = self.chInfo.set_index('Name')['Unit']
                     
-                    # 更新统计信息
+                    # Store updated statistics
                     self.segStatis[sseg] = stats
                 
             except Exception as e:
-                logger.error(f"统计计算错误: {str(e)}")
-                # 回退到原始方法
+                logger.error(f"Statistics calculation error: {str(e)}")
+                # Fall back to simple pandas aggregation
                 data_frame = self.data[sseg]
                 means = data_frame.mean()
                 stds = data_frame.std()
                 maxs = data_frame.max()
                 mins = data_frame.min()
                 
-                # 创建统计数据DataFrame
+                # Assemble fallback result DataFrame
                 stats_data = {
                     'Mean': means,
                     'Std': stds,
@@ -641,27 +640,27 @@ class ProcessingMixin:
                     'Unit': self.chInfo.set_index('Name')['Unit']
                 }
                 
-                # 更新统计信息
+                # Store updated statistics
                 self.segStatis[sseg] = pd.DataFrame(stats_data)
         else:
-            # 只更新指定通道的统计信息
+            # Update statistics for a single specified channel
             if chName in self.chInfo['Name'].values:
-                # 使用pandas的Series方法快速计算统计量
+                # Use pandas Series methods for fast single-channel statistics
                 series = self.data[sseg][chName]
                 
-                # 对于大型序列，使用分块处理
-                if len(series) > 10000000:  # 阈值可调整
-                    # 分块大小
+                # Chunked processing for very large series (adjustable threshold)
+                if len(series) > 10000000:
+                    # Chunk size in samples
                     chunk_size = 1000000
                     
-                    # 初始化结果
+                    # Initialise Welford accumulators
                     count = 0
                     mean = 0
                     M2 = 0
                     max_val = series.iloc[0]
                     min_val = series.iloc[0]
                     
-                    # 分块处理
+                    # Iterate over chunks
                     n_chunks = (len(series) + chunk_size - 1) // chunk_size
                     
                     for i in range(n_chunks):
@@ -669,11 +668,11 @@ class ProcessingMixin:
                         end_idx = min((i + 1) * chunk_size, len(series))
                         chunk = series.iloc[start_idx:end_idx]
                         
-                        # 更新最大最小值
+                        # Update running min/max
                         max_val = max(max_val, chunk.max())
                         min_val = min(min_val, chunk.min())
                         
-                        # 更新均值和方差（Welford算法）
+                        # Update mean and variance via Welford algorithm
                         for val in chunk:
                             count += 1
                             delta = val - mean
@@ -681,7 +680,7 @@ class ProcessingMixin:
                             delta2 = val - mean
                             M2 += delta * delta2
                     
-                    # 计算标准差
+                    # Compute standard deviation
                     std = np.sqrt(M2 / count)
                     
                     stats = {
@@ -691,14 +690,14 @@ class ProcessingMixin:
                         'min': min_val
                     }
                 else:
-                    # 对于小型序列，直接使用pandas方法
+                    # Small series: direct pandas aggregation
                     stats = series.agg(['mean', 'std', 'max', 'min'])
                 
-                # 获取单位
+                # Retrieve the channel unit
                 unit_idx = self.chInfo['Name'].values == chName
                 unit = self.chInfo.loc[unit_idx, 'Unit'].values[0]
                 
-                # 更新统计信息
+                # Write back to the statistics table
                 self.segStatis[sseg].loc[chName] = [
                     stats['mean'], stats['std'], stats['max'], stats['min'], unit]
             else:

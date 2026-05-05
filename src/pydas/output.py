@@ -58,7 +58,7 @@ def write_data(pydas_obj, filename, sseg='all', ch='all'):
                           -2,                    # File format version
                           pydas_obj.__chN__,     # Number of channels
                           0x0d,                  # Reserved
-                          pydas_obj.__fs__,      # Sampling frequency
+                          int(pydas_obj.__fs__), # Sampling frequency
                           len(sseg))             # Number of segments
 
         # Pack date and description
@@ -111,8 +111,8 @@ def write_data(pydas_obj, filename, sseg='all', ch='all'):
 
             # Write start and stop times (8 bytes)
             # Convert time strings to bytes: HH:MM:SS.s -> [s, SS, MM, HH]
-            start_time_parts = re.split(r':|\\.', pydas_obj.segInfo.Start.iloc[iseg])[::-1]
-            stop_time_parts = re.split(r':|\\.', pydas_obj.segInfo.Stop.iloc[iseg])[::-1]
+            start_time_parts = re.split(r':|\.', pydas_obj.segInfo.Start.iloc[iseg])[::-1]
+            stop_time_parts = re.split(r':|\.', pydas_obj.segInfo.Stop.iloc[iseg])[::-1]
             time_parts = start_time_parts + stop_time_parts
             time_parts_int = list(map(int, time_parts))
             fOut.write(struct.pack(8 * 'B', *time_parts_int))
@@ -189,7 +189,7 @@ def export_to_dat(pydas_obj, Time=True, sseg='all'):
 
         # Write data with or without time column
         if Time:
-            time_vector = np.arange(0, n_sample / pydas_obj.__fs__, 1 / pydas_obj.__fs__)
+            time_vector = np.arange(n_sample) / pydas_obj.__fs__
             datawrite = np.zeros((n_sample, pydas_obj.__chN__ + 1))
             datawrite[:, 0] = time_vector
             datawrite[:, 1:] = pydas_obj.data[idx].values

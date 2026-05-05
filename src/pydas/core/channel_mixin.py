@@ -52,7 +52,22 @@ class ChannelMixin:
             
             # Update channel info
             new_idx = self.__chN__ + 1
-            self.chInfo.loc[new_idx] = [name, unit, coef]
+            # Build row data by column name to support dynamic chInfo schemas.
+            # After to_fullscale(), chInfo may contain additional coefficient columns.
+            new_row = {col: np.nan for col in self.chInfo.columns}
+            if 'Name' in new_row:
+                new_row['Name'] = name
+            if 'Unit' in new_row:
+                new_row['Unit'] = unit
+            if 'Coef' in new_row:
+                new_row['Coef'] = coef
+            if 'CoeffUnit' in new_row:
+                new_row['CoeffUnit'] = 1.0
+            if 'CoeffRho' in new_row:
+                new_row['CoeffRho'] = 0.0
+            if 'CoeffLam' in new_row:
+                new_row['CoeffLam'] = 0.0
+            self.chInfo.loc[new_idx] = new_row
             
             # Update statistics
             self.segStatis[sseg].loc[name] = [

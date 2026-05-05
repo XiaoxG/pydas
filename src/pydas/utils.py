@@ -46,8 +46,12 @@ def diff1d(series, dx=1.0):
     - Automatically handles different array sizes
     - Maintains numerical accuracy for various input sizes
     """
-    # Convert input to numpy array
+    # Normalize input to a writable C-contiguous float64 array.
+    # Numba signatures declared with float64[:] may reject readonly views
+    # (for example, arrays coming from pandas internals).
     series_array = np.asarray(series, dtype=np.float64)
+    if (not series_array.flags.writeable) or (not series_array.flags.c_contiguous):
+        series_array = np.array(series_array, dtype=np.float64, copy=True, order='C')
     
     # Check input array size and select the most appropriate implementation
     if len(series_array) <= 1:
@@ -76,7 +80,7 @@ def diff1d(series, dx=1.0):
             dy[1] = dy[0]
             return dy
 
-# 使用numba加速的版本
+# Numba-accelerated implementations (compiled at import time if Numba is available)
 if NUMBA_AVAILABLE:
     @jit(float64[:](float64[:], float64), nopython=True, parallel=True, fastmath=True, cache=True)
     def _diff1d_numba(y, dx):
@@ -218,20 +222,20 @@ def data_change_fs(series, fs, fs_new):
     - Maintains signal integrity during resampling
     - Handles edge cases and potential extrapolation issues
     """
-    # 检查输入数组大小，选择最合适的实现
+    # Cast to float64; select implementation based on array size
     series_array = np.asarray(series, dtype='float64')
     
-    # 如果numba可用，使用加速版本
+    # Use Numba-accelerated version when available
     if NUMBA_AVAILABLE:
-        # 选择适合的numba优化版本
-        if len(series_array) > 10000000:  # 超大数据集
+        # Route to the most suitable Numba implementation for the data size
+        if len(series_array) > 10000000:  # Extremely large dataset
             return _data_change_fs_numba_huge(series_array, fs, fs_new)
-        elif len(series_array) > 1000000:  # 大数据集
+        elif len(series_array) > 1000000:  # Large dataset
             return _data_change_fs_numba_fast(series_array, fs, fs_new)
-        else:  # 中小型数据集
+        else:  # Small to medium dataset
             return _data_change_fs_numba(series_array, fs, fs_new)
     else:
-        # 原始实现
+        # Fallback: standard scipy implementation
         # Calculate the total time duration of the original signal
         total_time = 1 / fs * len(series)
         
@@ -248,66 +252,62 @@ def data_change_fs(series, fs, fs_new):
             x_series, series, kind='linear', axis=0, fill_value=(0, 0))
         series_interp = series_interp_func(x_new)
         
-        return series_interp
+    return series_interp
 
-# 使用numba加速的版本
+# Numba-accelerated implementations for data_change_fs
 if NUMBA_AVAILABLE:
     @jit(float64[:](float64[:], float64, float64), nopython=True, fastmath=True, cache=True)
     def _data_change_fs_numba(series, fs, fs_new):
-        """Numba加速版本的data_change_fs函数"""
-        # 计算原始信号的总时长
+        """Numba-accelerated resampling for small to medium arrays using np.interp."""
+        # Compute total signal duration
         total_time = 1 / fs * len(series)
         
-        # 创建原始和新的时间向量
+        # Build time axes for original and target sampling rates
         x_new = np.arange(0, total_time - 5 / fs_new, 1 / fs_new)
         x_series = np.arange(0, total_time, 1 / fs)
         
-        # 确保x_series与输入序列长度匹配
+        # Trim x_series to match the actual input length
         if len(x_series) > len(series):
             x_series = x_series[:len(series)]
         
-        # 使用numpy的interp函数进行插值
+        # Linear interpolation via numpy
         return np.interp(x_new, x_series, series)
     
     @jit(float64[:](float64[:], float64, float64), nopython=True, fastmath=True, parallel=True, cache=True)
     def _data_change_fs_numba_fast(series, fs, fs_new):
-        """针对大型数据集优化的data_change_fs函数"""
-        # 由于大数据集上直接使用interp可能占用大量内存，这里使用分块处理方法
-        # 计算原始信号的总时长
+        """Numba-accelerated resampling for large arrays using manual linear interpolation.
+        
+        Avoids building the full x_series array to reduce memory usage on large inputs.
+        """
         total_time = 1 / fs * len(series)
         
-        # 创建新的时间向量
+        # Target time axis
         x_new = np.arange(0, total_time - 5 / fs_new, 1 / fs_new)
         x_series = np.arange(0, total_time, 1 / fs)
         
-        # 确保x_series与输入序列长度匹配
+        # Trim x_series to match actual input length
         if len(x_series) > len(series):
             x_series = x_series[:len(series)]
         
-        # 创建结果数组
         result = np.zeros(len(x_new))
         
-        # 计算转换比例
-        ratio = fs / fs_new
-        
-        # 对于每个目标时间点，找到最近的两个源时间点并进行线性插值
+        # For each target sample find the two nearest source samples and interpolate
         for i in range(len(x_new)):
-            # 找到x_new[i]对应的在原数组中的位置（非整数）
+            # Fractional position in the source array
             pos = x_new[i] * fs
             
-            # 找到左右两个整数索引
+            # Surrounding integer indices
             pos_left = int(pos)
             pos_right = pos_left + 1
             
-            # 确保索引在有效范围内
+            # Clamp to valid range
             if pos_right >= len(series):
                 pos_right = len(series) - 1
             
-            # 计算插值权重
+            # Linear interpolation weights
             weight_right = pos - pos_left
             weight_left = 1.0 - weight_right
             
-            # 线性插值
             if pos_left < len(series):
                 result[i] = weight_left * series[pos_left] + weight_right * series[pos_right]
             
@@ -315,47 +315,43 @@ if NUMBA_AVAILABLE:
         
     @jit(float64[:](float64[:], float64, float64), nopython=True, parallel=True, fastmath=True, cache=True)
     def _data_change_fs_numba_huge(series, fs, fs_new):
-        """针对超大型数据集优化的data_change_fs函数，使用分块并行处理"""
-        # 计算原始信号的总时长
+        """Numba-accelerated resampling for extremely large arrays using chunked parallel processing."""
         total_time = 1 / fs * len(series)
         
-        # 创建新的时间向量
+        # Target time axis
         x_new = np.arange(0, total_time - 5 / fs_new, 1 / fs_new)
         
-        # 创建结果数组
         result = np.zeros(len(x_new))
         
-        # 分块处理
-        chunk_size = 1000000  # 每块大小
-        n_chunks = (len(x_new) + chunk_size - 1) // chunk_size  # 向上取整得到块数
+        # Divide output into fixed-size chunks for parallel processing
+        chunk_size = 1000000  # Samples per chunk
+        n_chunks = (len(x_new) + chunk_size - 1) // chunk_size  # Ceiling division
         
-        # 并行处理每个块
+        # Process each chunk in parallel via prange
         for chunk in prange(n_chunks):
             start = chunk * chunk_size
             end = min(start + chunk_size, len(x_new))
             
-            # 处理当前块
             for i in range(start, end):
-                # 找到x_new[i]对应的在原数组中的位置（非整数）
+                # Fractional position in the source array
                 pos = x_new[i] * fs
                 
-                # 找到左右两个整数索引
+                # Surrounding integer indices
                 pos_left = int(pos)
                 pos_right = pos_left + 1
                 
-                # 确保索引在有效范围内
+                # Clamp to valid range
                 if pos_right >= len(series):
                     pos_right = len(series) - 1
                 
-                # 计算插值权重
+                # Linear interpolation weights
                 weight_right = pos - pos_left
                 weight_left = 1.0 - weight_right
                 
-                # 线性插值
                 if pos_left < len(series):
                     result[i] = weight_left * series[pos_left] + weight_right * series[pos_right]
         
-        return result 
+        return result
 
 # Trans cache used by findtrans function for performance optimization
 _global_trans_cache = {}

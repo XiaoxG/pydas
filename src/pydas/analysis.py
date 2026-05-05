@@ -548,7 +548,8 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
         elif ch_name in pydas_obj.data[0].columns:
             # Use all segments combined
             data = []
-            for seg in pydas_obj.data:
+            iterable = pydas_obj.data.values() if isinstance(pydas_obj.data, dict) else pydas_obj.data
+            for seg in iterable:
                 if ch_name in seg.columns:
                     data.append(seg[ch_name])
             

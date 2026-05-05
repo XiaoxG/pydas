@@ -162,7 +162,7 @@ def apply_lowpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVal
         # 如果需要替换数据
         if replace:
             pydas_obj.data[sseg][chName] = filtered_data
-            logger.info(f'Lowpass for {chName} filter = {cutoffull:3.2f} rad/s in full scale, Lambda = {pydas_obj.__lam__:02d}')
+            logger.info(f'Lowpass for {chName} filter = {cutoffull:3.2f} rad/s in full scale, Lambda = {pydas_obj.__lam__:.2f}')
             pydas_obj.updateST(chName=chName)
     except Exception as e:
         logger.error(f"Failed to apply filter to {chName}: {str(e)}")
@@ -316,7 +316,7 @@ def apply_highpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVa
         # 如果需要替换数据
         if replace:
             pydas_obj.data[sseg][chName] = filtered_data
-            logger.info(f'Highpass for {chName} filter = {cutoffull:3.2f} rad/s in full scale, Lambda = {pydas_obj.__lam__:02d}')
+            logger.info(f'Highpass for {chName} filter = {cutoffull:3.2f} rad/s in full scale, Lambda = {pydas_obj.__lam__:.2f}')
             pydas_obj.updateST(chName=chName)
     except Exception as e:
         logger.error(f"Failed to apply filter to {chName}: {str(e)}")

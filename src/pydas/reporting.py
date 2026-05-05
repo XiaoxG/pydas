@@ -59,13 +59,15 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
     peak_distance : int, default=130
         Minimum distance between peaks for peak detection
     pot_threshold_factor : float, default=1.5
-        峰值超阈值（POT）方法的阈值系数
-        实际阈值 = pot_threshold_factor × 标准差 / √2（考虑单侧分布）
-        常用值：1.0（激进）、1.5（适中）、2.0（保守）
+        Threshold coefficient for the Peak-Over-Threshold (POT) method.
+        Actual threshold = pot_threshold_factor × STD / √2 (one-sided distribution).
+        Typical values: 1.0 (aggressive), 1.5 (moderate), 2.0 (conservative).
     mpm_method : str, default='POT'
-        MPM（最可能最大值）的计算方法
-        - 'POT': 峰值超阈值方法，使用Weibull分布拟合（默认，更精确但计算复杂）
-        - 'STD': 基于标准差的简化方法（假设窄带过程，适用于线性波浪）
+        Method for computing the Most Probable Maximum (MPM).
+        - 'POT': Peak-Over-Threshold with Weibull distribution fit (default; more accurate
+          but computationally intensive).
+        - 'STD': Simplified STD-based method (assumes narrow-band process, suitable for
+          linear waves).
         
     Returns
     -------
@@ -623,74 +625,77 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                   cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,
                   mpm_method='POT', frequency_separation=False):
     """
-    为PyDAS对象的所有通道生成详细的Excel分析报告，包括高低频分离分析
-    
+    Generate a detailed Excel analysis report for all channels in a PyDAS object,
+    with optional high/low frequency separation.
+
     Parameters
     ----------
     pydas_obj : PyDAS
-        PyDAS对象，包含要分析的数据
+        PyDAS object containing the data to analyse.
     output_file : str, default='channel_report.xlsx'
-        输出Excel文件的路径
+        Path to the output Excel file.
     sseg : int, default=0
-        要分析的数据段索引
+        Index of the data segment to analyse.
     fullscale : bool, default=True
-        是否使用实际尺度（原型尺度）值
+        Whether to convert data to full (prototype) scale before analysis.
     lam : float, optional
-        尺度因子，仅在fullscale=True且PyDAS对象未设置__lam__属性时使用
+        Scale factor. Used only when ``fullscale=True`` and the PyDAS object has no
+        ``__lam__`` attribute.
     rho : float, default=1.025
-        水密度 (kg/m³)，仅用于fullscale=True时
+        Water density in kg/m³. Used only when ``fullscale=True``.
     g : float, default=9.807
-        重力加速度 (m/s²)，仅用于fullscale=True时
+        Gravitational acceleration in m/s². Used only when ``fullscale=True``.
     header_text : str, optional
-        报告中的标题文本
+        Title text for the report. Auto-generated from the filename if *None*.
     include_charts : bool, default=False
-        是否在报告中包含图表
+        Whether to embed charts in the Excel report.
     significant_percentile : float, default=33.0
-        计算显著值的百分位数
+        Percentile used to compute significant values (e.g. 33 % → top 1/3).
     wave_analysis : bool, default=True
-        是否进行波浪分析
+        Whether to perform wave-by-wave analysis.
     format_sheet : bool, default=True
-        是否设置Excel格式
+        Whether to apply Excel formatting (fonts, borders, column widths).
     zerocrossing_analysis : bool, default=True
-        是否进行过零分析
+        Whether to perform zero-crossing analysis.
     amplitude_analysis : bool, default=True
-        是否进行振幅分析
+        Whether to perform amplitude analysis.
     cutoffperiod : float, default=15.0
-        高低频分离的截止周期（秒），用于分离高频和低频成分
+        Cut-off period in seconds for separating low- and high-frequency components.
     peak_distance : int, default=130
-        峰值检测的最小距离参数，用于 Weibull 分析中的峰值检测
+        Minimum sample distance between peaks used in Weibull peak detection.
     pot_threshold_factor : float, default=1.5
-        峰值超阈值（POT）方法的阈值系数
-        实际阈值 = pot_threshold_factor × 标准差 / √2（考虑单侧分布）
-        常用值：1.0（激进）、1.5（适中）、2.0（保守）
+        Threshold coefficient for the POT method.
+        Actual threshold = pot_threshold_factor × STD / √2 (one-sided).
+        Typical values: 1.0 (aggressive), 1.5 (moderate), 2.0 (conservative).
     mpm_method : str, default='POT'
-        MPM（最可能最大值）的计算方法
-        - 'POT': 峰值超阈值方法，使用Weibull分布拟合（默认，更精确但计算复杂）
-        - 'STD': 基于标准差的简化方法（假设窄带过程，适用于线性波浪）
+        MPM (Most Probable Maximum) calculation method.
+        - 'POT': Peak-Over-Threshold with Weibull fit (default; more accurate).
+        - 'STD': Simplified STD-based method (assumes narrow-band process).
     frequency_separation : bool, default=False
-        是否进行高低频分离分析。如果为True，将分别分析总体、低频（T>cutoffperiod）
-        和高频（T<cutoffperiod）成分；如果为False，只分析总体数据
-        
+        If *True*, analyse total, low-frequency (T > cutoffperiod), and high-frequency
+        (T < cutoffperiod) components separately. If *False*, analyse total data only.
+
     Returns
     -------
     tuple of pandas.DataFrame or pandas.DataFrame
-        - 如果frequency_separation=True：返回包含三个DataFrame的元组(总统计, 低频统计, 高频统计)
-        - 如果frequency_separation=False：只返回总统计的DataFrame
-        
+        - If ``frequency_separation=True``: tuple of (total_stats, low_freq_stats,
+          high_freq_stats).
+        - If ``frequency_separation=False``: total statistics DataFrame only.
+
     Notes
     -----
-    - 生成一个包含所有通道统计分析的Excel报告
-    - 报告包括基本统计值、过零分析、振幅分析和极值估计
-    - 可以选择是否使用实际尺度值（原型尺度）
-    - 分析可能需要一些时间，特别是对于大型数据集
+    - Generates an Excel report with statistical analysis for every channel.
+    - The report includes basic statistics, zero-crossing analysis, amplitude
+      analysis, and extreme-value estimates.
+    - Analysis may take time for large datasets.
     """
-    # 检查输入
+    # Validate segment index
     if sseg >= pydas_obj.__segN__:
-        logger.error(f"段索引 {sseg} 超出最大段数 ({pydas_obj.__segN__-1})")
+        logger.error(f"Segment index {sseg} exceeds maximum ({pydas_obj.__segN__ - 1})")
         return None
 
     if fullscale:
-        # 确定尺度因子
+        # Resolve scale factor
         if lam is None:
             if hasattr(pydas_obj, '__lam__'):
                 lam = pydas_obj.__lam__
@@ -713,7 +718,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         else:
             header_text = f"Wave Analysis Report [{scale_text}]"
     
-    # 创建结果DataFrame的列
+    # Define result DataFrame columns
     columns = [
         'channel\nID', 'Name', 'unit', 'number\nof zero\nupcross', 
         'maximum', 'minimum', 'mean', 'STD',
@@ -723,34 +728,34 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         'mean\nzerocro.\nperiod'
     ]
     
-    # 创建结果DataFrame
+    # Initialise results DataFrame
     results_total = pd.DataFrame(columns=columns)
     
-    # 只在需要时创建高低频结果DataFrame
+    # Allocate high/low frequency DataFrames only when needed
     if frequency_separation:
         results_low = pd.DataFrame(columns=columns)
         results_high = pd.DataFrame(columns=columns)
     
-    # 获取通道信息
+    # Retrieve channel info
     ch_info = pydas_analysis.chInfo
     
-    # 计算分析周期
+    # Compute time step and data duration
     dt = 1.0 / pydas_analysis.__fs__
     data_duration_seconds = len(pydas_analysis.data[sseg]) * dt
     data_duration_hours = data_duration_seconds / 3600
     
-    # 计算截止频率（从周期转换为rad/s）
+    # Convert cut-off period to angular frequency (rad/s)
     cutoff_freq = 2 * np.pi / cutoffperiod
     
-    # 对每个通道进行分析
+    # Analyse each channel
     for ch_idx, (_, row) in enumerate(ch_info.iterrows(), 1):
         ch_name = row['Name']
         ch_unit = row['Unit']
         
-        # 获取原始数据
+        # Get scaled channel data
         data_scaled = pydas_analysis.data[sseg][ch_name].values
         
-        # 分析总体数据
+        # Analyse total (unfiltered) data
         results_total_ch = analyze_channel_data(
             data_scaled, zerocrossing_analysis=zerocrossing_analysis,
             amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
@@ -758,7 +763,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
         )
         
-        # 将结果添加到总体DataFrame
+        # Append total results for this channel
         results_total.loc[ch_idx] = [
             ch_idx, ch_name, ch_unit, results_total_ch['zero_upcross'],
             results_total_ch['maximum'], results_total_ch['minimum'],
@@ -772,13 +777,13 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             results_total_ch['mean_zerocross_period']
         ]
         
-        # 只在需要时进行高低频分离分析
+        # Frequency separation analysis (only when requested)
         if frequency_separation:
-            # 分离高低频
+            # Decompose into low- and high-frequency components
             data_low = pydas_analysis.apply_lowpass_filter(ch_name, cutoff_freq, returnValue=True)
             data_high = pydas_analysis.apply_highpass_filter(ch_name, cutoff_freq, returnValue=True)
             
-            # 分析低频数据
+            # Analyse low-frequency component
             results_low_ch = analyze_channel_data(
                 data_low, zerocrossing_analysis=zerocrossing_analysis,
                 amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
@@ -786,7 +791,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                 pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
             )
             
-            # 分析高频数据
+            # Analyse high-frequency component
             results_high_ch = analyze_channel_data(
                 data_high, zerocrossing_analysis=zerocrossing_analysis,
                 amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
@@ -794,7 +799,7 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                 pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
             )
             
-            # 将结果添加到相应的DataFrame
+            # Append low/high frequency results
             results_low.loc[ch_idx] = [
                 ch_idx, ch_name, ch_unit, results_low_ch['zero_upcross'],
                 results_low_ch['maximum'], results_low_ch['minimum'],
@@ -908,23 +913,23 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                         col_width_map = {
                             1: 6,   # ID
                             2: 20,  # Name
-                            3: 8    # 单位
+                            3: 8    # Unit
                         }
                         
                         default_width = 12
                         special_widths = {
-                            4: 10,  # 零上穿数
-                            9: 15,  # 最大双振幅
-                            10: 15, # 显著双振幅
+                            4: 10,  # Zero upcrossings
+                            9: 15,  # Maximum double amplitude
+                            10: 15, # Significant double amplitude
                             11: 12, # Pos. sign. amplitude
                             12: 12, # Neg. sign. amplitude
                             13: 12, # MPM_pos
                             14: 12, # MPM_neg
                             15: 10, # EEV_pos
                             16: 10, # EEV_neg
-                            17: 12, # irregularity factor
-                            18: 10, # crest factor
-                            19: 12  # 平均零上穿周期
+                            17: 12, # Irregularity factor
+                            18: 10, # Crest factor
+                            19: 12  # Mean zero-upcross period
                         }
                         
                         for i in range(1, ws.max_column + 1):
@@ -945,79 +950,80 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         except Exception as e:
             logger.error(f"Error exporting Excel file: {str(e)}")
     
-    # 返回结果
+    # Return results
     if frequency_separation:
-        # 返回所有三个DataFrame
+        # Return all three DataFrames
         return results_total, results_low, results_high
     else:
-        # 只返回总体统计DataFrame
+        # Return total statistics only
         return results_total
 
 def wave_report(pydas_obj, ch_name, sseg=0, save_path=None, title=None, L=1024,
                 Hs=None, Tp=None, gamma=None, bins=50, fullscale=False, lam=None, 
                 rho=1.025, g=9.807):
     """
-    生成波浪分析报告，包括时间序列、谱分析和峰值统计
-    
+    Generate a wave analysis report including time series, spectral analysis, and peak statistics.
+
     Parameters
     ----------
-    pydas_obj : PyDAS object
-        PyDAS对象
+    pydas_obj : PyDAS
+        PyDAS object containing the data.
     ch_name : str
-        要分析的通道名称
+        Name of the channel to analyse.
     sseg : int, optional
-        数据段索引，默认为0
+        Segment index, default is 0.
     save_path : str, optional
-        保存图片的路径，默认为None
+        Path to save the figure. If *None*, the figure is not saved.
     title : str, optional
-        图表标题，默认为None
+        Figure title. If *None*, no title is used.
     L : int, optional
-        谱分析的数据块长度，默认为1024
+        Block length for spectral analysis, default is 1024.
     Hs : float, optional
-        JONSWAP谱的有效波高，默认为None
+        Significant wave height for JONSWAP reference spectrum. If *None*, no reference
+        spectrum is plotted.
     Tp : float, optional
-        JONSWAP谱的峰值周期，默认为None
+        Peak period for JONSWAP reference spectrum.
     gamma : float, optional
-        JONSWAP谱的峰值增强因子，默认为None
+        Peak enhancement factor for JONSWAP spectrum. Defaults to 3.3 when *None*.
     bins : int, optional
-        直方图的bin数量，默认为50
+        Number of histogram bins, default is 50.
     fullscale : bool, optional
-        是否使用实际尺度数据，默认为False
+        Whether to convert to full-scale data, default is *False*.
     lam : float, optional
-        尺度因子，默认为None
+        Scale factor. Inferred from ``pydas_obj.__lam__`` when *None*.
     rho : float, optional
-        水密度 (kg/m3)，默认为1.025
+        Water density in kg/m³, default is 1.025.
     g : float, optional
-        重力加速度 (m/s2)，默认为9.807
-        
+        Gravitational acceleration in m/s², default is 9.807.
+
     Returns
     -------
     fig : matplotlib.figure.Figure
-        生成的图表对象
+        The generated figure object.
     """
-    # 检查通道是否存在
+    # Validate channel name
     if ch_name not in pydas_obj.data[sseg]:
         raise ValueError(f"Channel {ch_name} not found in segment {sseg}")
     
-    # 获取数据
+    # Load channel data
     data = pydas_obj.data[sseg][ch_name].values
     unit = 'cm'
     T = np.arange(len(data)) / pydas_obj.__fs__
 
-    # 如果需要转换为实际尺度
+    # Convert to full scale if requested
     if fullscale:
         if lam is None:
             lam = pydas_obj.__lam__
         ts = pydas_obj.channel2fullscale(ch_name, lam, rho, g)
         data = ts.data
         T = ts.args
-        unit = 'm'  # 更新单位
+        unit = 'm'  # Update unit after scaling
     
-    # 创建图表
+    # Build the figure layout
     fig = plt.figure(figsize=(10, 11))
     gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 1])
     
-    # 1. 时间序列图（第一行，全宽）
+    # 1. Time series plot (full-width top row)
     ax1 = fig.add_subplot(gs[0, :])
     ax1.plot(T/3600, data)
     ax1.set_xlabel('Time (hr)')
@@ -1028,19 +1034,19 @@ def wave_report(pydas_obj, ch_name, sseg=0, save_path=None, title=None, L=1024,
     if title:
         fig.suptitle(title, y=0.95)
     
-    # 2. 谱分析（第二行，左）
+    # 2. Spectral analysis (middle row, left)
     ax2 = fig.add_subplot(gs[1, 0])
     spec = pydas_obj.spectral_analysis(ch_name, method='cov', L=L, plot=False, 
                                      fullscale=fullscale, lam=lam, rho=rho, g=g)
     
-    # 获取谱数据
+    # Extract spectral data
     freq = spec.args
     psd = spec.data
     
-    # 绘制测量谱
+    # Plot measured spectrum
     ax2.plot(freq, psd, label='Measured')
     
-    # 如果提供了JONSWAP参数，绘制理论谱
+    # Overlay JONSWAP reference spectrum if parameters are provided
     if Hs is not None and Tp is not None:
         from .waveModel.objects import Jonswap
         jonswap_spec = Jonswap(Hs, Tp, gamma=gamma if gamma is not None else 3.3)
@@ -1055,13 +1061,13 @@ def wave_report(pydas_obj, ch_name, sseg=0, save_path=None, title=None, L=1024,
     ax2.grid(True)
     ax2.set_title('Wave Spectrum')
     
-    # 计算并显示谱特征
-    m0 = np.trapz(psd, freq)  # 使用数值积分计算零阶矩
+    # Compute and annotate spectral characteristics
+    m0 = np.trapezoid(psd, freq) if hasattr(np, 'trapezoid') else np.trapz(psd, freq)  # Zeroth spectral moment via numerical integration
     Hm0 = 4.0 * np.sqrt(m0)
     text = f'Hm0 = {Hm0:.2f} {unit}'
     ax2.text(0.05, 0.95, text, transform=ax2.transAxes, verticalalignment='top')
     
-    # 3. 直方图和正态拟合（第二行，右）
+    # 3. Amplitude histogram with normal fit (middle row, right)
     ax3 = fig.add_subplot(gs[1, 1])
     n, bins, patches = ax3.hist(data, bins=bins, density=True, alpha=0.6)
     

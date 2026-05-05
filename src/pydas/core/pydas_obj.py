@@ -43,7 +43,6 @@ class PyDAS(IOMixin, ChannelMixin, ProcessingMixin, PlotMixin, AnalysisMixin, Re
         - Calculates basic statistics for each channel
         """
         # Configure logger
-        # self.set_logger(log_level)  # 使用新的setup_logger函数
         setup_logger(log_level)
         
         # Initialize basic properties

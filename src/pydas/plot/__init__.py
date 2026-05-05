@@ -12,147 +12,147 @@ import os
 # Set up logging
 logger = logging.getLogger('pydas.plot')
 
-# 检查plotly-resampler库是否可用
+# Check whether the optional plotly-resampler library is available
 try:
     import plotly_resampler
     HAS_PLOTLY_RESAMPLER = True
-    logger.info("plotly-resampler库已加载，将启用大数据集优化功能")
+    logger.info("plotly-resampler loaded; large-dataset optimisation enabled.")
 except ImportError:
     HAS_PLOTLY_RESAMPLER = False
-    logger.info("未检测到plotly-resampler，建议安装以优化大数据集: pip install plotly-resampler")
+    logger.info("plotly-resampler not found. Install for large-dataset optimisation: pip install plotly-resampler")
 
 def use_webgl_rendering(fig, data_length=None, threshold=10000):
     """
-    将plotly图表转换为使用WebGL渲染以提高大数据集的性能
-    
+    Convert a Plotly figure to use WebGL rendering for better performance on large datasets.
+
     Parameters:
     -----------
     fig : plotly.graph_objects.Figure
-        要优化的plotly图表对象
+        The Plotly figure to optimise.
     data_length : int, optional
-        数据点数量，如果不提供则从图表数据中估计
+        Number of data points. Estimated from the figure data when *None*.
     threshold : int, optional
-        触发WebGL的数据点阈值，默认为10000
-        
+        Data-point count above which WebGL rendering is activated, default is 10000.
+
     Returns:
     --------
     plotly.graph_objects.Figure
-        优化后的图表对象
+        The optimised figure object.
     """
     try:
         import plotly.graph_objects as go
         
-        # 估计数据点数量(如果未提供)
+        # Estimate data length if not provided
         if data_length is None:
             data_length = 0
             for trace in fig.data:
                 if hasattr(trace, 'x') and trace.x is not None:
                     data_length = max(data_length, len(trace.x))
                     
-        # 如果数据量小于阈值，则不需要优化
+        # Skip optimisation when below the threshold
         if data_length < threshold:
             return fig
             
-        # 转换所有散点图为WebGL模式
+        # Upgrade all Scatter traces to ScatterGL for WebGL acceleration
         for i, trace in enumerate(fig.data):
             if hasattr(trace, 'type') and trace.type == 'scatter':
-                # 获取当前trace的所有属性
+                # Copy all trace attributes
                 trace_dict = trace.to_plotly_json()
-                # 修改类型为scattergl
+                # Switch renderer to WebGL
                 trace_dict['type'] = 'scattergl'
-                # 替换原trace
+                # Replace the original trace
                 fig.data[i] = trace_dict
                 
-        # 其他WebGL优化设置
+        # Additional WebGL layout settings
         fig.update_layout(
-            uirevision='constant',  # 保持UI状态
-            hovermode='closest',    # 优化悬停性能
+            uirevision='constant',  # Preserve UI state across updates
+            hovermode='closest',    # Optimise hover performance
         )
         
-        logger.info(f"已启用WebGL渲染加速 ({data_length} 数据点)")
+        logger.info(f"WebGL rendering enabled ({data_length} data points).")
         return fig
     except Exception as e:
-        logger.warning(f"启用WebGL渲染失败: {e}")
-        return fig  # 返回原始图表
+        logger.warning(f"Failed to enable WebGL rendering: {e}")
+        return fig  # Return unmodified figure
 
 def create_resampable_plot(x, y, name=None, title=None, n_shown_samples=5000):
     """
-    创建可动态重采样的图表，适用于非常大的时间序列数据集
-    
+    Create a dynamically resampable plot suitable for very large time series datasets.
+
     Parameters:
     -----------
     x : numpy.ndarray
-        x轴数据
+        X-axis data.
     y : numpy.ndarray
-        y轴数据
+        Y-axis data.
     name : str, optional
-        数据系列名称
+        Trace name shown in the legend.
     title : str, optional
-        图表标题
+        Figure title.
     n_shown_samples : int, optional
-        初始显示的数据点数，默认5000
-        
+        Number of samples displayed initially, default is 5000.
+
     Returns:
     --------
     FigureResampler or None
-        可重采样图表对象，如果库不可用则返回None
+        Resampable figure object, or *None* if the library is unavailable.
     """
     if not HAS_PLOTLY_RESAMPLER:
-        logger.warning("未安装plotly_resampler库，无法使用动态重采样功能")
+        logger.warning("plotly_resampler is not installed; dynamic resampling is unavailable.")
         return None
         
     try:
         from plotly_resampler import FigureResampler
         import plotly.graph_objects as go
         
-        # 创建基础图表
+        # Build a base figure
         fig = go.Figure()
         
-        # 添加数据
-        trace_name = name if name else "数据"
+        # Add the data trace
+        trace_name = name if name else "data"
         fig.add_trace(go.Scatter(x=x, y=y, name=trace_name))
         
-        # 设置布局
+        # Apply title if provided
         if title:
             fig.update_layout(title=title)
             
-        # 创建可重采样的图表
+        # Wrap in a FigureResampler for dynamic downsampling
         fig_resampler = FigureResampler(
             fig, 
             default_n_shown_samples=n_shown_samples,
-            resampled_trace_prefix_suffix=(None, " (重采样)")
+            resampled_trace_prefix_suffix=(None, " (resampled)")
         )
         
-        logger.info(f"已创建可动态重采样图表 (数据点: {len(x)}, 显示点数: {n_shown_samples})")
+        logger.info(f"Resampable figure created (data points: {len(x)}, shown: {n_shown_samples}).")
         return fig_resampler
     except Exception as e:
-        logger.warning(f"创建可重采样图表失败: {e}")
+        logger.warning(f"Failed to create resampable figure: {e}")
         return None
 
 def lttb_downsample(x, y, n_out):
     """
-    使用LTTB (Largest-Triangle-Three-Buckets) 算法进行下采样
-    保留数据的视觉特征
-    
+    Downsample data using the LTTB (Largest-Triangle-Three-Buckets) algorithm,
+    preserving the visual shape of the signal.
+
     Parameters:
     -----------
     x : numpy.ndarray
-        x轴数据
+        X-axis data.
     y : numpy.ndarray
-        y轴数据
+        Y-axis data.
     n_out : int
-        输出点数
-        
+        Number of output points.
+
     Returns:
     --------
     tuple
-        (x_sampled, y_sampled) 下采样后的数据点
+        ``(x_sampled, y_sampled)`` – downsampled data points.
     """
     n = len(x)
     if n <= n_out:
         return x, y
         
-    # 始终保留第一点和最后一点
+    # Always keep the first and last points
     sampled_x = np.zeros(n_out)
     sampled_y = np.zeros(n_out)
     sampled_x[0] = x[0]
@@ -160,25 +160,25 @@ def lttb_downsample(x, y, n_out):
     sampled_x[n_out-1] = x[n-1]
     sampled_y[n_out-1] = y[n-1]
     
-    # 计算桶大小
+    # Compute bucket width
     bucket_size = (n - 2) / (n_out - 2)
     
-    # 对每个输出点
+    # For each output point, find the sample that forms the largest triangle
     for i in range(1, n_out-1):
-        # 计算三个桶的范围
+        # Bucket boundaries for points a, b, c
         a = int((i - 1) * bucket_size) + 1
         b = int(i * bucket_size) + 1
         c = int((i + 1) * bucket_size) + 1 if i < n_out-2 else n-1
         
-        # 当前点a
+        # Point a: last selected point
         point_a_x = sampled_x[i-1]
         point_a_y = sampled_y[i-1]
         
-        # 计算下一个点c
+        # Point c: average of the next bucket
         point_c_x = x[c-1]
         point_c_y = y[c-1]
         
-        # 在中间桶b中寻找形成最大面积的点
+        # Search bucket b for the point that maximises triangle area
         max_area = -1
         max_idx = b
         
@@ -191,7 +191,7 @@ def lttb_downsample(x, y, n_out):
                 max_area = area
                 max_idx = j
         
-        # 保存最佳点
+        # Store the best point
         sampled_x[i] = x[max_idx]
         sampled_y[i] = y[max_idx]
     
@@ -199,7 +199,7 @@ def lttb_downsample(x, y, n_out):
 
 # Global plot configuration
 PLOT_CONFIG = {
-    # 通用尺寸配置
+    # Figure size presets
     'figsize': {
         'small': (8, 6),
         'medium': (12, 8),
@@ -209,7 +209,7 @@ PLOT_CONFIG = {
         'tall': (6, 8),
     },
     
-    # 通用字体配置
+    # Font settings
     'font': {
         'family': 'Arial, sans-serif',
         'size': {
@@ -225,7 +225,7 @@ PLOT_CONFIG = {
         'weight': 'normal',
     },
     
-    # 图表样式
+    # Plot style themes
     'style': {
         'matplotlib': {
             'default': 'seaborn-v0_8-whitegrid',
@@ -250,9 +250,9 @@ PLOT_CONFIG = {
         },
     },
     
-    # 默认颜色
+    # Default colours
     'colors': {
-        'default': 'tab10',  # matplotlib colormap名称
+        'default': 'tab10',  # matplotlib colormap name
         'sequential': 'viridis',
         'diverging': 'coolwarm',
         'qualitative': 'tab10',
@@ -263,7 +263,7 @@ PLOT_CONFIG = {
         'annotation': 'gray',
     },
     
-    # 图表元素设置
+    # Plot element defaults
     'elements': {
         'line_width': 1.5,
         'marker_size': 5,
@@ -273,7 +273,7 @@ PLOT_CONFIG = {
         'edge_color': '#000000',
     },
     
-    # 统计表配置
+    # Statistics table configuration
     'stats': {
         'table_width': 0.3,
         'table_height': 0.2,
@@ -282,27 +282,27 @@ PLOT_CONFIG = {
     },
 }
 
-# 导出常用配置供外部使用
+# Re-export commonly used config values for convenience
 DEFAULT_FIGSIZE = PLOT_CONFIG['figsize']['medium']
 DEFAULT_FONT_SIZE = PLOT_CONFIG['font']['size']['medium']
 DEFAULT_DPI = PLOT_CONFIG['elements']['dpi']
 
 def get_plot_backend(backend=None):
     """
-    获取指定的绘图后端，如果指定的后端不可用，则尝试其他后端
-    
+    Return the requested plotting backend, falling back to available alternatives.
+
     Parameters:
     -----------
     backend : str or None
-        要使用的后端: 'plotly', 'matplotlib', 'seaborn', 或 None (自动选择)
-        
+        Backend to use: 'plotly', 'matplotlib', 'seaborn', or *None* (auto-select).
+
     Returns:
     --------
     str
-        实际使用的后端名称
+        Name of the backend that will be used.
     """
     if backend is None:
-        # 按优先级尝试后端
+        # Try backends in order of preference
         try:
             import plotly
             return 'plotly'
@@ -318,7 +318,7 @@ def get_plot_backend(backend=None):
                     logger.error("No available plotting backend found. Install plotly, seaborn, or matplotlib.")
                     return None
     
-    # 检查指定的后端是否可用
+    # Check whether the requested backend is available
     if backend.lower() == 'plotly':
         try:
             import plotly
@@ -349,15 +349,15 @@ def get_plot_backend(backend=None):
 
 def apply_style(backend, style=None):
     """
-    应用指定的绘图样式到指定的后端
-    
+    Apply the specified plotting style for the given backend.
+
     Parameters:
     -----------
     backend : str
-        绘图后端: 'plotly', 'matplotlib', 或 'seaborn'
+        Plotting backend: 'plotly', 'matplotlib', or 'seaborn'.
     style : str or None
-        样式名称，如果为None则使用默认样式
-        
+        Style name. Uses the default style when *None*.
+
     Returns:
     --------
     None
@@ -365,7 +365,7 @@ def apply_style(backend, style=None):
     if backend is None:
         return
     
-    # 如果未指定样式，使用默认样式
+    # Default to the 'default' style when none is specified
     if style is None:
         style = 'default'
     
@@ -385,7 +385,7 @@ def apply_style(backend, style=None):
         except Exception as e:
             logger.warning(f"Failed to apply seaborn style: {e}")
     
-    # Plotly样式在创建图表时应用
+    # Plotly styles are applied when the figure is created
 
 def validate_channel(pydas_obj, ch_idx):
     """
