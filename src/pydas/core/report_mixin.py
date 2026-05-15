@@ -97,13 +97,24 @@ class ReportMixin:
             
         return None
 
-    def channel_report(self, output_file='channel_report.xlsx', sseg=0, fullscale=True, 
-                      lam=None, rho=1.025, g=9.807, header_text=None, include_charts=True, 
-                      significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
-                      zerocrossing_analysis=True, amplitude_analysis=True, 
-                      cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,mpm_method='POT'):
+    def channel_report(self, output_file='channel_report.xlsx', sseg=0, fullscale=True,
+                      lam=None, rho=1.025, g=9.807, header_text=None, include_charts=True,
+                      significant_percentile=33.0, wave_analysis=True, format_sheet=True,
+                      zerocrossing_analysis=True, amplitude_analysis=True,
+                      cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,
+                      mpm_method='POT', frequency_separation=False,
+                      wave_type='irregular', metrics=None):
         """
         Generate a detailed Excel analysis report for all channels in this PyDAS object.
+
+        The report content is layered:
+
+        * ``wave_type`` selects a high-level analysis preset
+          (``'irregular'`` for the full ocean-engineering report,
+          ``'regular'`` for a lean basic + zero-crossing + STD-amplitude report
+          where MPM/EEV are intentionally excluded).
+        * ``metrics`` lets you customise the exact list / order of statistical
+          columns regardless of ``wave_type``.
 
         Parameters
         ----------
@@ -117,15 +128,15 @@ class ReportMixin:
             Scale factor. Used only when ``fullscale=True`` and this object has no
             ``__lam__`` attribute.
         rho : float, default=1.025
-            Water density in kg/m³. Used only when ``fullscale=True``.
+            Water density in kg/m^3. Used only when ``fullscale=True``.
         g : float, default=9.807
-            Gravitational acceleration in m/s². Used only when ``fullscale=True``.
+            Gravitational acceleration in m/s^2. Used only when ``fullscale=True``.
         header_text : str, optional
             Title text for the report. Auto-generated from the filename if *None*.
         include_charts : bool, default=True
             Whether to embed charts in the Excel report.
         significant_percentile : float, default=33.0
-            Percentile used to compute significant values (e.g. 33 % → top 1/3).
+            Percentile used to compute significant values (e.g. 33 -> top 1/3).
         wave_analysis : bool, default=True
             Whether to perform wave-by-wave analysis.
         format_sheet : bool, default=True
@@ -138,25 +149,64 @@ class ReportMixin:
             Cut-off period in seconds for separating low- and high-frequency components.
         peak_distance : int, default=10
             Minimum sample distance between peaks used in Weibull peak detection.
+        pot_threshold_factor : float, default=1.5
+            Threshold coefficient for the POT method.
+        mpm_method : {'POT', 'STD'}, default='POT'
+            MPM/EEV calculation method (only used when ``wave_type='irregular'``
+            or when MPM-related metrics are explicitly requested).
+        frequency_separation : bool, default=False
+            If *True*, additionally analyse low-frequency (T > cutoffperiod) and
+            high-frequency (T < cutoffperiod) components in separate sheets.
+        wave_type : {'irregular', 'regular'}, default='irregular'
+            High-level analysis preset.
+
+            - ``'irregular'``: full report with peak-based amplitudes and
+              MPM/EEV extreme-value estimates (default).
+            - ``'regular'``: basic statistics + zero-crossing + amplitudes
+              derived from ``sqrt(2)*STD`` (single) and ``2*sqrt(2)*STD``
+              (double). MPM/EEV are excluded by default and the heavy
+              extreme-value pipeline is skipped for performance.
+        metrics : list of str, optional
+            Explicit list of metric IDs that defines the exact set / order of
+            report columns. When *None*, the default set of ``wave_type`` is
+            used. See ``pydas.reporting.METRIC_CATALOG`` for valid IDs.
 
         Returns
         -------
         pandas.DataFrame or tuple of pandas.DataFrame
             Statistical results. See :func:`~pydas.reporting.channel_report` for details.
 
+        Examples
+        --------
+        Default irregular wave report (full content):
+
+        >>> obj.channel_report('irregular.xlsx')
+
+        Regular wave report (basic stats + zero-crossing + STD amplitudes):
+
+        >>> obj.channel_report('regular.xlsx', wave_type='regular')
+
+        Custom irregular report with only the columns you care about:
+
+        >>> obj.channel_report(
+        ...     'custom.xlsx',
+        ...     wave_type='irregular',
+        ...     metrics=['maximum', 'minimum', 'mean', 'STD',
+        ...              'mpm_pos', 'mpm_neg', 'mean_zerocross_period'],
+        ... )
+
         Notes
         -----
-        - Generates an Excel report with statistical analysis for every channel.
-        - Report includes basic statistics, zero-crossing analysis, amplitude analysis,
-          and extreme-value estimates.
-        - Produces full-scale (prototype-scale) values by default.
-        - Output format is compatible with standard ocean engineering data-processing tools.
+        - Default ``wave_type='irregular'`` reproduces the original 19-column
+          report.
+        - Output format is compatible with standard ocean engineering data
+          processing tools.
         """
         # Use the object's default scale factor if lam is not provided but __lam__ exists
         if fullscale and lam is None and hasattr(self, '__lam__'):
             lam = self.__lam__
             logger.info(f"Using object's default scale factor: \u03bb = {lam}")
-        
+
         # Delegate to the standalone channel_report function in the reporting module
         return _channel_report(
             pydas_obj=self,
@@ -176,7 +226,10 @@ class ReportMixin:
             cutoffperiod=cutoffperiod,
             peak_distance=peak_distance,
             pot_threshold_factor=pot_threshold_factor,
-            mpm_method=mpm_method
+            mpm_method=mpm_method,
+            frequency_separation=frequency_separation,
+            wave_type=wave_type,
+            metrics=metrics,
         )
 
     def print_statistics(self, printTxt=False, printExcel=False):

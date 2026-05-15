@@ -31,13 +31,118 @@ logger = logging.getLogger('pydas.reporting')
 # Euler-Mascheroni constant for expected extreme value calculation
 GAMMA = 0.57721566
 
+# ---------------------------------------------------------------------------
+# Metric catalog
+# ---------------------------------------------------------------------------
+# Each entry maps a metric ID to (column header for Excel, key in the result
+# dict returned by ``analyze_channel_data``).
+#
+# Column headers may contain explicit ``\n`` line breaks, which Excel will
+# render as multi-line headers when ``wrap_text=True`` is applied.
+# ---------------------------------------------------------------------------
+METRIC_CATALOG = {
+    # --- Basic statistics ---
+    'maximum':                  ('maximum',                 'maximum'),
+    'minimum':                  ('minimum',                 'minimum'),
+    'mean':                     ('mean',                    'mean'),
+    'STD':                      ('STD',                     'STD'),
+    # --- Zero-crossing analysis ---
+    'zero_upcross':             ('number\nof zero\nupcross', 'zero_upcross'),
+    'mean_zerocross_period':    ('mean\nzerocro.\nperiod',  'mean_zerocross_period'),
+    # --- Wave-by-wave amplitude (irregular wave) ---
+    'maximum_double_amplitude': ('maximum\ndouble\namplitude', 'maximum_double_amplitude'),
+    'sign_double_amplitude':    ('sign.\ndouble\namplitude',   'sign_double_amplitude'),
+    'pos_sign_amplitude':       ('Pos. sign.\namplitude',   'pos_sign_amplitude'),
+    'neg_sign_amplitude':       ('Neg. sign.\namplitude',   'neg_sign_amplitude'),
+    # --- STD-based amplitude (regular wave; assumes sinusoidal: A = sqrt(2)*sigma) ---
+    # Internal IDs keep the ``_std`` suffix to preserve the calculation
+    # semantics, but the Excel column headers are intentionally simplified.
+    'amplitude_std':            ('amplitude',               'amplitude_std'),
+    'double_amplitude_std':     ('double\namplitude',       'double_amplitude_std'),
+    # --- Extreme value estimates ---
+    'mpm_pos':                  ('MPM_pos',                 'mpm_pos'),
+    'mpm_neg':                  ('MPM_neg',                 'mpm_neg'),
+    'eev_pos':                  ('EEV_pos',                 'eev_pos'),
+    'eev_neg':                  ('EEV_neg',                 'eev_neg'),
+    # --- Signal characteristics ---
+    'irregularity_factor':      ('irregularity\nfactor',    'irregularity_factor'),
+    'crest_factor':             ('crest\nfactor',           'crest_factor'),
+}
+
+# Default metric sets per wave-type. Order in the list defines column order.
+DEFAULT_METRICS_IRREGULAR = [
+    'zero_upcross',
+    'maximum', 'minimum', 'mean', 'STD',
+    'maximum_double_amplitude', 'sign_double_amplitude',
+    'pos_sign_amplitude', 'neg_sign_amplitude',
+    'mpm_pos', 'mpm_neg', 'eev_pos', 'eev_neg',
+    'irregularity_factor', 'crest_factor',
+    'mean_zerocross_period',
+]
+
+DEFAULT_METRICS_REGULAR = [
+    'zero_upcross',
+    'maximum', 'minimum', 'mean', 'STD',
+    'amplitude_std', 'double_amplitude_std',
+    'mean_zerocross_period',
+]
+
+# Metric IDs that require Most-Probable-Maximum / Expected-Extreme-Value
+# computation (used to decide whether to run the heavy POT/STD analysis).
+_MPM_METRIC_IDS = {
+    'mpm_pos', 'mpm_neg', 'eev_pos', 'eev_neg',
+    'pos_sign_amplitude', 'neg_sign_amplitude',
+}
+
+# Metric IDs that require wave-by-wave peak detection.
+_PEAK_METRIC_IDS = {
+    'maximum_double_amplitude', 'sign_double_amplitude',
+} | _MPM_METRIC_IDS
+
+
+def _resolve_metrics(wave_type, metrics):
+    """Return a validated list of metric IDs based on ``wave_type``/``metrics``.
+
+    Parameters
+    ----------
+    wave_type : str
+        Either ``'irregular'`` or ``'regular'``. Determines the default metric
+        set when ``metrics`` is *None*.
+    metrics : list of str or None
+        User-specified metric IDs. When *None*, the default set for
+        ``wave_type`` is used.
+
+    Returns
+    -------
+    list of str
+        Validated list of metric IDs (unknown IDs are dropped with a warning).
+    """
+    wave_type = (wave_type or 'irregular').lower()
+    if wave_type not in ('irregular', 'regular'):
+        logger.warning(
+            f"Unknown wave_type '{wave_type}'. Falling back to 'irregular'.")
+        wave_type = 'irregular'
+
+    if metrics is None:
+        metrics = (DEFAULT_METRICS_IRREGULAR if wave_type == 'irregular'
+                   else DEFAULT_METRICS_REGULAR)
+
+    validated = []
+    for m in metrics:
+        if m in METRIC_CATALOG:
+            validated.append(m)
+        else:
+            logger.warning(f"Unknown metric ID '{m}', ignored.")
+    return validated
+
 def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_analysis=True, 
                       amplitude_analysis=True, significant_percentile=33.0,
                       data_duration_hours=None, dt=None, peak_distance=130, 
-                      pot_threshold_factor=1.5, mpm_method='POT'):
+                      pot_threshold_factor=1.5, mpm_method='POT',
+                      wave_type='irregular', compute_extremes=None):
     """
     Analyze channel data and return statistical results including MPM, EEV, and ocean engineering parameters
-    
+
     Parameters
     ----------
     data_scaled : numpy.ndarray
@@ -60,7 +165,7 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
         Minimum distance between peaks for peak detection
     pot_threshold_factor : float, default=1.5
         Threshold coefficient for the Peak-Over-Threshold (POT) method.
-        Actual threshold = pot_threshold_factor × STD / √2 (one-sided distribution).
+        Actual threshold = pot_threshold_factor x STD / sqrt(2) (one-sided).
         Typical values: 1.0 (aggressive), 1.5 (moderate), 2.0 (conservative).
     mpm_method : str, default='POT'
         Method for computing the Most Probable Maximum (MPM).
@@ -68,16 +173,35 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
           but computationally intensive).
         - 'STD': Simplified STD-based method (assumes narrow-band process, suitable for
           linear waves).
-        
+    wave_type : str, default='irregular'
+        Wave-type hint that controls the default analysis depth:
+        - 'irregular': perform full peak detection, MPM/EEV estimation and
+          wave-by-wave amplitude analysis.
+        - 'regular': skip MPM/EEV (and the heavy peak/Weibull pipeline) by
+          default. Only basic statistics, zero-crossing analysis and the
+          STD-based amplitude estimates are produced.
+    compute_extremes : bool, optional
+        Override for ``wave_type``. When *None* (default), MPM/EEV computation
+        is enabled for ``wave_type='irregular'`` and disabled for ``'regular'``.
+        Set to *True* / *False* to force-enable / disable independently of the
+        wave type (useful when the caller only needs a subset of metrics).
+
     Returns
     -------
     dict
         Dictionary containing all statistical results including:
         - Basic statistics: maximum, minimum, mean, STD
-        - Wave parameters: maximum_double_amplitude, sign_double_amplitude, mean_zerocross_period, zero_upcross
-        - Extreme values: MPM (Most Probable Maximum) and EEV (Expected Extreme Value) for positive and negative peaks
+        - STD-based amplitudes: amplitude_std (= sqrt(2)*STD),
+          double_amplitude_std (= 2*sqrt(2)*STD)
+        - Wave parameters: maximum_double_amplitude, sign_double_amplitude,
+          mean_zerocross_period, zero_upcross
+        - Extreme values: MPM (Most Probable Maximum) and EEV (Expected Extreme Value)
+          for positive and negative peaks
         - Ocean engineering parameters: irregularity_factor, crest_factor
     """
+    # Resolve compute_extremes from wave_type if not specified explicitly
+    if compute_extremes is None:
+        compute_extremes = (str(wave_type).lower() != 'regular')
     
     # Helper functions for MPM calculation (Weibull EVD)
     def _weibull_evd_pdf(x, mu, sigma, k, n):
@@ -114,6 +238,12 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
         'minimum': min_val,
         'mean': mean_val,
         'STD': std_val,
+        # STD-based amplitudes (theoretical values for a sinusoidal signal):
+        #   single amplitude  A  = sqrt(2) * sigma
+        #   double amplitude  2A = 2*sqrt(2) * sigma
+        # These are always available because they are essentially free to compute.
+        'amplitude_std': float(np.sqrt(2.0) * std_val),
+        'double_amplitude_std': float(2.0 * np.sqrt(2.0) * std_val),
         'maximum_double_amplitude': 0,
         'sign_double_amplitude': 0,
         'pos_sign_amplitude': np.nan,  # Positive significant amplitude
@@ -258,7 +388,14 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
         results['crest_factor'] = np.nan
     
     logger.debug(f"Calculated parameters: irregularity_factor={results['irregularity_factor']:.3f}, crest_factor={results['crest_factor']:.3f}")
-    
+
+    # Skip the heavy extreme-value pipeline when not required (e.g. regular waves).
+    if not compute_extremes:
+        logger.debug(
+            f"compute_extremes=False (wave_type='{wave_type}'); "
+            "MPM/EEV analysis skipped.")
+        return results
+
     # MPM Analysis using selected method
     if mpm_method == 'STD':
         # Simplified method based on standard deviation (assumes narrow-band process)
@@ -618,15 +755,116 @@ def analyze_channel_data(data_scaled, mean_val=None, std_val=None, zerocrossing_
     
     return results
 
-def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullscale=True, 
-                  lam=None, rho=1.025, g=9.807, header_text=None, include_charts=False, 
-                  significant_percentile=33.0, wave_analysis=True, format_sheet=True, 
-                  zerocrossing_analysis=True, amplitude_analysis=True, 
+def _build_results_row(ch_idx, ch_name, ch_unit, ch_results, metric_ids):
+    """Build one row of the results DataFrame from a metric-id list."""
+    row = [ch_idx, ch_name, ch_unit]
+    for mid in metric_ids:
+        _, result_key = METRIC_CATALOG[mid]
+        row.append(ch_results.get(result_key, np.nan))
+    return row
+
+
+def _format_report_sheet(ws, columns, header_text, sheet_name, results_df):
+    """Apply standard Excel formatting to a report sheet (fonts, borders, widths)."""
+    # Add header rows
+    ws.insert_rows(0, 2)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columns))
+    title_cell = ws.cell(row=1, column=1, value=f"{header_text} - {sheet_name}")
+
+    # Format title
+    title_cell.font = Font(bold=True, size=14)
+    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # Define borders
+    thick_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin'),
+    )
+
+    # Format data rows
+    for row in range(3, ws.max_row + 1):
+        for col in range(1, ws.max_column + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.border = thick_border
+
+            if col == 1:      # ID
+                cell.alignment = Alignment(horizontal='center')
+            elif col == 2:    # Name
+                cell.alignment = Alignment(horizontal='left')
+            elif col == 3:    # Unit
+                cell.alignment = Alignment(horizontal='center')
+            else:             # Numeric values
+                cell.alignment = Alignment(horizontal='center')
+                if isinstance(cell.value, (int, float)) and col >= 4:
+                    if abs(cell.value) < 0.001:
+                        cell.value = "0.000"
+                    else:
+                        cell.value = f"{cell.value:.3f}"
+
+    # Format column headers
+    header_row = 3
+    header_fill = PatternFill(start_color='E9E9E9', end_color='E9E9E9', fill_type='solid')
+    for col in range(1, ws.max_column + 1):
+        cell = ws.cell(row=header_row, column=col)
+        cell.font = Font(bold=True, size=10)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = thick_border
+
+    # Page layout
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.paperSize = 9  # A4
+    ws.page_margins = PageMargins(left=0.5, right=0.5, top=0.5, bottom=0.5)
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.print_area = f'A1:{get_column_letter(ws.max_column)}{ws.max_row}'
+    ws.print_title_rows = '1:3'
+
+    # Column widths: fixed for first 3 columns (ID/Name/Unit), data-driven for the rest
+    fixed_widths = {1: 6, 2: 20, 3: 8}
+    default_width = 12
+    for i in range(1, ws.max_column + 1):
+        col_letter = get_column_letter(i)
+        if i in fixed_widths:
+            ws.column_dimensions[col_letter].width = fixed_widths[i]
+        else:
+            try:
+                col_name = columns[i - 1]
+                content_width = max(
+                    len(str(c)) for c in results_df[col_name].astype(str)
+                ) * 1.2
+                header_width = max(len(s) for s in str(col_name).split('\n')) * 1.2
+                width = max(content_width, header_width, default_width)
+                ws.column_dimensions[col_letter].width = min(width, 20)
+            except Exception:
+                ws.column_dimensions[col_letter].width = default_width
+        ws.column_dimensions[col_letter].bestFit = True
+
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+
+def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullscale=True,
+                  lam=None, rho=1.025, g=9.807, header_text=None, include_charts=False,
+                  significant_percentile=33.0, wave_analysis=True, format_sheet=True,
+                  zerocrossing_analysis=True, amplitude_analysis=True,
                   cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,
-                  mpm_method='POT', frequency_separation=False):
+                  mpm_method='POT', frequency_separation=False,
+                  wave_type='irregular', metrics=None):
     """
     Generate a detailed Excel analysis report for all channels in a PyDAS object,
     with optional high/low frequency separation.
+
+    The report content is now controlled by two layered parameters:
+
+    * ``wave_type`` selects the high-level analysis preset
+      (``'irregular'`` for the full ocean-engineering report,
+      ``'regular'`` for a lean basic + zero-crossing + STD-amplitude report).
+    * ``metrics`` lets you fine-tune the exact set of statistics that appear as
+      columns in the report. When *None*, the default set for ``wave_type`` is
+      used; pass an explicit list of metric IDs (see :data:`METRIC_CATALOG`)
+      to override.
 
     Parameters
     ----------
@@ -642,15 +880,15 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         Scale factor. Used only when ``fullscale=True`` and the PyDAS object has no
         ``__lam__`` attribute.
     rho : float, default=1.025
-        Water density in kg/m³. Used only when ``fullscale=True``.
+        Water density in kg/m^3. Used only when ``fullscale=True``.
     g : float, default=9.807
-        Gravitational acceleration in m/s². Used only when ``fullscale=True``.
+        Gravitational acceleration in m/s^2. Used only when ``fullscale=True``.
     header_text : str, optional
         Title text for the report. Auto-generated from the filename if *None*.
     include_charts : bool, default=False
         Whether to embed charts in the Excel report.
     significant_percentile : float, default=33.0
-        Percentile used to compute significant values (e.g. 33 % → top 1/3).
+        Percentile used to compute significant values (e.g. 33 -> top 1/3).
     wave_analysis : bool, default=True
         Whether to perform wave-by-wave analysis.
     format_sheet : bool, default=True
@@ -661,11 +899,11 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         Whether to perform amplitude analysis.
     cutoffperiod : float, default=15.0
         Cut-off period in seconds for separating low- and high-frequency components.
-    peak_distance : int, default=130
+    peak_distance : int, default=10
         Minimum sample distance between peaks used in Weibull peak detection.
     pot_threshold_factor : float, default=1.5
         Threshold coefficient for the POT method.
-        Actual threshold = pot_threshold_factor × STD / √2 (one-sided).
+        Actual threshold = pot_threshold_factor * STD / sqrt(2) (one-sided).
         Typical values: 1.0 (aggressive), 1.5 (moderate), 2.0 (conservative).
     mpm_method : str, default='POT'
         MPM (Most Probable Maximum) calculation method.
@@ -674,6 +912,18 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
     frequency_separation : bool, default=False
         If *True*, analyse total, low-frequency (T > cutoffperiod), and high-frequency
         (T < cutoffperiod) components separately. If *False*, analyse total data only.
+    wave_type : {'irregular', 'regular'}, default='irregular'
+        Analysis preset:
+        - 'irregular': full report with peak-based amplitudes and MPM/EEV
+          extreme-value estimates.
+        - 'regular': basic statistics + zero-crossing + amplitudes derived from
+          ``sqrt(2) * STD`` (single) and ``2*sqrt(2) * STD`` (double). MPM/EEV
+          and other peak-based metrics are excluded by default and the heavy
+          extreme-value pipeline is skipped for performance.
+    metrics : list of str, optional
+        Explicit list of metric IDs that defines the exact set / order of
+        report columns. When *None*, the default set of ``wave_type`` is used.
+        See :data:`METRIC_CATALOG` for valid IDs.
 
     Returns
     -------
@@ -684,15 +934,30 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
 
     Notes
     -----
-    - Generates an Excel report with statistical analysis for every channel.
-    - The report includes basic statistics, zero-crossing analysis, amplitude
-      analysis, and extreme-value estimates.
+    - Default behaviour for ``wave_type='irregular'`` reproduces the original
+      19-column report.
+    - Setting ``wave_type='regular'`` yields a lean report focused on linear /
+      regular wave tests where MPM/EEV are not meaningful.
     - Analysis may take time for large datasets.
     """
     # Validate segment index
     if sseg >= pydas_obj.__segN__:
         logger.error(f"Segment index {sseg} exceeds maximum ({pydas_obj.__segN__ - 1})")
         return None
+
+    # Resolve wave_type and metric set
+    wave_type = (wave_type or 'irregular').lower()
+    metric_ids = _resolve_metrics(wave_type, metrics)
+    if not metric_ids:
+        logger.error("No valid metrics resolved; aborting report generation.")
+        return None
+
+    # Decide whether to compute the heavy MPM/EEV pipeline:
+    # only run it if at least one MPM-dependent metric was requested.
+    compute_extremes = bool(set(metric_ids) & _MPM_METRIC_IDS)
+    logger.info(
+        f"Channel report wave_type='{wave_type}', "
+        f"{len(metric_ids)} metric column(s), compute_extremes={compute_extremes}.")
 
     if fullscale:
         # Resolve scale factor
@@ -702,261 +967,114 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             else:
                 logger.warning("Scale factor lam not provided and object has no __lam__ attribute")
                 return None
-        
-        logger.info(f"Creating data copy and converting to full scale (λ={lam}, ρ={rho}, g={g})...")
+
+        logger.info(f"Creating data copy and converting to full scale (lam={lam}, rho={rho}, g={g})...")
         pydas_analysis = copy.deepcopy(pydas_obj)
         pydas_analysis.to_fullscale(rho=rho, g=g, pInfo=False)
         scale_text = "Full Scale"
     else:
         pydas_analysis = pydas_obj
         scale_text = "Model Scale"
-    
+
     if header_text is None:
+        wave_label = "Regular" if wave_type == 'regular' else "Irregular"
         if hasattr(pydas_obj, 'filename'):
             filename = os.path.basename(pydas_obj.filename)
-            header_text = f"Wave only [{filename}, {scale_text}]"
+            header_text = f"{wave_label} wave [{filename}, {scale_text}]"
         else:
-            header_text = f"Wave Analysis Report [{scale_text}]"
-    
-    # Define result DataFrame columns
-    columns = [
-        'channel\nID', 'Name', 'unit', 'number\nof zero\nupcross', 
-        'maximum', 'minimum', 'mean', 'STD',
-        'maximum\ndouble\namplitude', 'sign.\ndouble\namplitude', 
-        'Pos. sign.\namplitude', 'Neg. sign.\namplitude',
-        'MPM_pos', 'MPM_neg', 'EEV_pos', 'EEV_neg', 'irregularity\nfactor', 'crest\nfactor',
-        'mean\nzerocro.\nperiod'
-    ]
-    
-    # Initialise results DataFrame
+            header_text = f"{wave_label} Wave Analysis Report [{scale_text}]"
+
+    # Build dynamic column list: fixed identification columns + selected metrics
+    fixed_columns = ['channel\nID', 'Name', 'unit']
+    metric_columns = [METRIC_CATALOG[mid][0] for mid in metric_ids]
+    columns = fixed_columns + metric_columns
+
+    # Initialise results DataFrame(s)
     results_total = pd.DataFrame(columns=columns)
-    
-    # Allocate high/low frequency DataFrames only when needed
     if frequency_separation:
         results_low = pd.DataFrame(columns=columns)
         results_high = pd.DataFrame(columns=columns)
-    
+
     # Retrieve channel info
     ch_info = pydas_analysis.chInfo
-    
+
     # Compute time step and data duration
     dt = 1.0 / pydas_analysis.__fs__
     data_duration_seconds = len(pydas_analysis.data[sseg]) * dt
     data_duration_hours = data_duration_seconds / 3600
-    
+
     # Convert cut-off period to angular frequency (rad/s)
     cutoff_freq = 2 * np.pi / cutoffperiod
-    
+
+    # Common kwargs for analyze_channel_data
+    common_kwargs = dict(
+        zerocrossing_analysis=zerocrossing_analysis,
+        amplitude_analysis=amplitude_analysis,
+        significant_percentile=significant_percentile,
+        data_duration_hours=data_duration_hours,
+        dt=dt,
+        peak_distance=peak_distance,
+        pot_threshold_factor=pot_threshold_factor,
+        mpm_method=mpm_method,
+        wave_type=wave_type,
+        compute_extremes=compute_extremes,
+    )
+
     # Analyse each channel
     for ch_idx, (_, row) in enumerate(ch_info.iterrows(), 1):
         ch_name = row['Name']
         ch_unit = row['Unit']
-        
+
         # Get scaled channel data
         data_scaled = pydas_analysis.data[sseg][ch_name].values
-        
+
         # Analyse total (unfiltered) data
-        results_total_ch = analyze_channel_data(
-            data_scaled, zerocrossing_analysis=zerocrossing_analysis,
-            amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-            data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
-            pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
-        )
-        
-        # Append total results for this channel
-        results_total.loc[ch_idx] = [
-            ch_idx, ch_name, ch_unit, results_total_ch['zero_upcross'],
-            results_total_ch['maximum'], results_total_ch['minimum'],
-            results_total_ch['mean'], results_total_ch['STD'],
-            results_total_ch['maximum_double_amplitude'],
-            results_total_ch['sign_double_amplitude'],
-            results_total_ch['pos_sign_amplitude'], results_total_ch['neg_sign_amplitude'],
-            results_total_ch['mpm_pos'], results_total_ch['mpm_neg'],
-            results_total_ch['eev_pos'], results_total_ch['eev_neg'],
-            results_total_ch['irregularity_factor'], results_total_ch['crest_factor'],
-            results_total_ch['mean_zerocross_period']
-        ]
-        
+        results_total_ch = analyze_channel_data(data_scaled, **common_kwargs)
+        results_total.loc[ch_idx] = _build_results_row(
+            ch_idx, ch_name, ch_unit, results_total_ch, metric_ids)
+
         # Frequency separation analysis (only when requested)
         if frequency_separation:
-            # Decompose into low- and high-frequency components
             data_low = pydas_analysis.apply_lowpass_filter(ch_name, cutoff_freq, returnValue=True)
             data_high = pydas_analysis.apply_highpass_filter(ch_name, cutoff_freq, returnValue=True)
-            
-            # Analyse low-frequency component
-            results_low_ch = analyze_channel_data(
-                data_low, zerocrossing_analysis=zerocrossing_analysis,
-                amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-                data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
-                pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
-            )
-            
-            # Analyse high-frequency component
-            results_high_ch = analyze_channel_data(
-                data_high, zerocrossing_analysis=zerocrossing_analysis,
-                amplitude_analysis=amplitude_analysis, significant_percentile=significant_percentile,
-                data_duration_hours=data_duration_hours, dt=dt, peak_distance=peak_distance,
-                pot_threshold_factor=pot_threshold_factor, mpm_method=mpm_method
-            )
-            
-            # Append low/high frequency results
-            results_low.loc[ch_idx] = [
-                ch_idx, ch_name, ch_unit, results_low_ch['zero_upcross'],
-                results_low_ch['maximum'], results_low_ch['minimum'],
-                results_low_ch['mean'], results_low_ch['STD'],
-                results_low_ch['maximum_double_amplitude'],
-                results_low_ch['sign_double_amplitude'],
-                results_low_ch['pos_sign_amplitude'], results_low_ch['neg_sign_amplitude'],
-                results_low_ch['mpm_pos'], results_low_ch['mpm_neg'],
-                results_low_ch['eev_pos'], results_low_ch['eev_neg'],
-                results_low_ch['irregularity_factor'], results_low_ch['crest_factor'],
-                results_low_ch['mean_zerocross_period']
-            ]
-            
-            results_high.loc[ch_idx] = [
-                ch_idx, ch_name, ch_unit, results_high_ch['zero_upcross'],
-                results_high_ch['maximum'], results_high_ch['minimum'],
-                results_high_ch['mean'], results_high_ch['STD'],
-                results_high_ch['maximum_double_amplitude'],
-                results_high_ch['sign_double_amplitude'],
-                results_high_ch['pos_sign_amplitude'], results_high_ch['neg_sign_amplitude'],
-                results_high_ch['mpm_pos'], results_high_ch['mpm_neg'],
-                results_high_ch['eev_pos'], results_high_ch['eev_neg'],
-                results_high_ch['irregularity_factor'], results_high_ch['crest_factor'],
-                results_high_ch['mean_zerocross_period']
-            ]
+
+            results_low_ch = analyze_channel_data(data_low, **common_kwargs)
+            results_high_ch = analyze_channel_data(data_high, **common_kwargs)
+
+            results_low.loc[ch_idx] = _build_results_row(
+                ch_idx, ch_name, ch_unit, results_low_ch, metric_ids)
+            results_high.loc[ch_idx] = _build_results_row(
+                ch_idx, ch_name, ch_unit, results_high_ch, metric_ids)
 
     # Create Excel file
     if output_file:
         try:
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                # Write total statistics
                 results_total.to_excel(writer, sheet_name='Total Statistics', index=False)
-                
-                # Write frequency-separated results if applicable
+
                 if frequency_separation:
                     results_low.to_excel(writer, sheet_name=f'Low Freq (T>{cutoffperiod}s)', index=False)
                     results_high.to_excel(writer, sheet_name=f'High Freq (T<{cutoffperiod}s)', index=False)
-                
+
                 if format_sheet:
-                    # Determine sheets to format
-                    sheet_names = ['Total Statistics']
+                    sheet_specs = [('Total Statistics', results_total)]
                     if frequency_separation:
-                        sheet_names.extend([f'Low Freq (T>{cutoffperiod}s)', f'High Freq (T<{cutoffperiod}s)'])
-                    
-                    for sheet_name in sheet_names:
+                        sheet_specs.append((f'Low Freq (T>{cutoffperiod}s)', results_low))
+                        sheet_specs.append((f'High Freq (T<{cutoffperiod}s)', results_high))
+
+                    for sheet_name, df in sheet_specs:
                         ws = writer.sheets[sheet_name]
-                        
-                        # Add header rows
-                        ws.insert_rows(0, 2)
-                        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columns))
-                        title_cell = ws.cell(row=1, column=1, value=f"{header_text} - {sheet_name}")
-                        
-                        # Format header
-                        title_cell.font = Font(bold=True, size=14)
-                        title_cell.alignment = Alignment(horizontal='center', vertical='center')
-                        
-                        # Set column widths
-                        for i, column in enumerate(columns, 1):
-                            col_width = max(len(str(c)) for c in results_total[column].astype(str)) * 1.2
-                            col_width = max(col_width, len(column) * 1.2)
-                            ws.column_dimensions[get_column_letter(i)].width = min(col_width, 20)
-                        
-                        # Define borders
-                        thick_border = Border(
-                            left=Side(style='thin'), 
-                            right=Side(style='thin'),
-                            top=Side(style='thin'),
-                            bottom=Side(style='thin')
-                        )
-                        
-                        # Format data rows
-                        for row in range(3, ws.max_row + 1):
-                            for col in range(1, ws.max_column + 1):
-                                cell = ws.cell(row=row, column=col)
-                                cell.border = thick_border
-                                
-                                if col == 1:  # ID
-                                    cell.alignment = Alignment(horizontal='center')
-                                elif col == 2:  # Name
-                                    cell.alignment = Alignment(horizontal='left')
-                                else:  # Numeric values
-                                    cell.alignment = Alignment(horizontal='center')
-                                    
-                                    if isinstance(cell.value, (int, float)) and col >= 4:
-                                        if abs(cell.value) < 0.001:
-                                            cell.value = "0.000"
-                                        else:
-                                            cell.value = f"{cell.value:.3f}"
-                        
-                        # Format column headers
-                        header_row = 3
-                        header_fill = PatternFill(start_color='E9E9E9', end_color='E9E9E9', fill_type='solid')
-                        
-                        for col in range(1, ws.max_column + 1):
-                            cell = ws.cell(row=header_row, column=col)
-                            cell.font = Font(bold=True, size=10)
-                            cell.fill = header_fill
-                            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                            cell.border = thick_border
-                        
-                        # Page layout
-                        ws.page_setup.orientation = 'landscape'
-                        ws.page_setup.paperSize = 9  # A4
-                        ws.page_margins = PageMargins(left=0.5, right=0.5, top=0.5, bottom=0.5)
-                        ws.page_setup.fitToWidth = 1
-                        ws.page_setup.fitToHeight = 0
-                        ws.print_area = f'A1:{get_column_letter(ws.max_column)}{ws.max_row}'
-                        ws.print_title_rows = '1:3'
-                        
-                        # Custom column widths
-                        col_width_map = {
-                            1: 6,   # ID
-                            2: 20,  # Name
-                            3: 8    # Unit
-                        }
-                        
-                        default_width = 12
-                        special_widths = {
-                            4: 10,  # Zero upcrossings
-                            9: 15,  # Maximum double amplitude
-                            10: 15, # Significant double amplitude
-                            11: 12, # Pos. sign. amplitude
-                            12: 12, # Neg. sign. amplitude
-                            13: 12, # MPM_pos
-                            14: 12, # MPM_neg
-                            15: 10, # EEV_pos
-                            16: 10, # EEV_neg
-                            17: 12, # Irregularity factor
-                            18: 10, # Crest factor
-                            19: 12  # Mean zero-upcross period
-                        }
-                        
-                        for i in range(1, ws.max_column + 1):
-                            col_letter = get_column_letter(i)
-                            if i in col_width_map:
-                                ws.column_dimensions[col_letter].width = col_width_map[i]
-                            elif i in special_widths:
-                                ws.column_dimensions[col_letter].width = special_widths[i]
-                            else:
-                                ws.column_dimensions[col_letter].width = default_width
-                            
-                            ws.column_dimensions[col_letter].bestFit = True
-                        
-                        ws.sheet_properties.pageSetUpPr.fitToPage = True
-            
+                        _format_report_sheet(ws, columns, header_text, sheet_name, df)
+
             logger.info(f"Report successfully exported to {output_file}")
-        
+
         except Exception as e:
             logger.error(f"Error exporting Excel file: {str(e)}")
-    
+
     # Return results
     if frequency_separation:
-        # Return all three DataFrames
         return results_total, results_low, results_high
-    else:
-        # Return total statistics only
-        return results_total
+    return results_total
 
 def wave_report(pydas_obj, ch_name, sseg=0, save_path=None, title=None, L=1024,
                 Hs=None, Tp=None, gamma=None, bins=50, fullscale=False, lam=None, 

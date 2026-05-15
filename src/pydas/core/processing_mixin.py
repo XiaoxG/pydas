@@ -10,7 +10,7 @@ from ..process import (
     apply_lowpass_filter, apply_highpass_filter, remove_mean, 
     add_value, multiply_value, move_data, data_wash, add_diff1, add_diff2
 )
-from ..utils import get_default_transDict, findtrans, data_change_fs
+from ..utils import get_default_transDict, findtrans
 from ..waveModel.objects import TimeSeries
 
 logger = logging.getLogger(__name__)
