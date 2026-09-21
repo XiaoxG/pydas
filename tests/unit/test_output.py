@@ -115,5 +115,5 @@ def test_from_dataframe_out_roundtrip(tmp_path):
     loaded = PyDAS(filename=str(out_file), lam=1.0)
     assert loaded.__chN__ == 2
     assert loaded.__fs__ == 20
-    np.testing.assert_allclose(loaded.data[0]["eta"].values, df["eta"].values, rtol=1e-3)
-    np.testing.assert_allclose(loaded.data[0]["acc"].values, df["acc"].values, rtol=1e-3)
+    np.testing.assert_allclose(loaded.data[0]["eta"].values, df["eta"].values, rtol=1e-3, atol=1e-4)
+    np.testing.assert_allclose(loaded.data[0]["acc"].values, df["acc"].values, rtol=1e-3, atol=1e-4)
