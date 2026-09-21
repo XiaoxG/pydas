@@ -1,4 +1,8 @@
-"""PyDAS Core - Report Mixin"""
+"""PyDAS Core - Report Mixin
+
+Console / Excel summaries and channel / wave reports.  Metric catalogues
+are documented in ``docs/channel_report_metrics.md``.
+"""
 import os
 import pandas as pd
 import logging
@@ -12,8 +16,8 @@ class ReportMixin:
         """
         Print and optionally export general information about the data.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         printTxt : bool, optional
             If True, export information to a text file, default is False
         printExcel : bool, optional
@@ -62,15 +66,15 @@ class ReportMixin:
         """
         Print and optionally export channel information.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         printTxt : bool, optional
             If True, export information to a text file, default is False
         printExcel : bool, optional
             If True, export information to an Excel file, default is False
             
-        Returns:
-        --------
+        Returns
+        -------
         DataFrame
             DataFrame containing channel information
         """
@@ -233,15 +237,15 @@ class ReportMixin:
         """
         Print and optionally export statistical information for all channels.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         printTxt : bool, optional
             If True, export statistics to a text file, default is False
         printExcel : bool, optional
             If True, export statistics to an Excel file, default is False
             
-        Returns:
-        --------
+        Returns
+        -------
         None
             Statistics are printed to the console and optionally exported to files
         """

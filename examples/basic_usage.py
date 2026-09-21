@@ -1,44 +1,54 @@
 #!/usr/bin/env python
-"""Basic PyDAS usage with the current public API."""
+"""Basic PyDAS usage with the current public API.
 
-from pydas import PyDAS
-import pydas.waveModel as wm
+Run from the repository root after ``pip install -e .``::
+
+    python examples/basic_usage.py
+"""
+
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
+import pydas.waveModel as wm
+from pydas import PyDAS
 
-def create_synthetic_data(filename="synthetic_data.csv"):
-    """Write a small CSV that can be loaded via PyDAS.from a DataFrame workflow.
 
-    The binary ``.out`` reader is still the primary I/O path. This helper only
-    builds arrays so the example can construct an empty PyDAS object.
-    """
-    fs = 10.0
-    t = np.arange(0, 20, 1 / fs)
-    f1, f2, f3 = 0.5, 1.0, 2.0
-    a1, a2, a3 = 1.0, 0.5, 0.25
+def make_signal(fs=10.0, duration=20.0, seed=0):
+    """Return sampling rate, time axis, and a three-tone series."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(0, duration, 1 / fs)
     signal = (
-        a1 * np.sin(2 * np.pi * f1 * t)
-        + a2 * np.sin(2 * np.pi * f2 * t)
-        + a3 * np.sin(2 * np.pi * f3 * t)
-        + 0.1 * np.random.randn(len(t))
+        1.0 * np.sin(2 * np.pi * 0.5 * t)
+        + 0.5 * np.sin(2 * np.pi * 1.0 * t)
+        + 0.25 * np.sin(2 * np.pi * 2.0 * t)
+        + 0.1 * rng.standard_normal(len(t))
     )
-    df = pd.DataFrame({"Time": t, "signal": signal})
-    df.to_csv(filename, index=False)
-    return filename, fs, t, signal
+    return fs, t, signal
 
 
-def main():
+def main(out_dir="."):
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     print("PyDAS basic usage example")
     print("-------------------------")
+    print(f"Artifact directory: {out_dir}")
 
-    _csv, fs, t, signal = create_synthetic_data()
-    data = PyDAS(filename=None, lam=1.0)
-    data.add_channel("signal", "m", signal, fs)
+    fs, _t, signal = make_signal()
+    df = pd.DataFrame({"signal": signal})
+    data = PyDAS.from_dataframe(df, fs=fs, lam=1.0, units={"signal": "m"})
     print(f"Loaded {data.__chN__} channel(s): {list(data.chInfo['Name'])}")
 
-    data.plot_channel("signal", plotbackend="plotly", show=False, save_html="signal_plot.html")
-    print("Wrote interactive figure: signal_plot.html")
+    plot_path = out_dir / "signal_plot.png"
+    data.plot_channel(
+        "signal",
+        plotbackend="matplotlib",
+        show=False,
+        save_path=str(plot_path),
+    )
+    print(f"Wrote matplotlib figure: {plot_path}")
 
     spec = data.spectral_analysis(
         channel_name="signal",
@@ -54,4 +64,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import tempfile
+
+    main(tempfile.mkdtemp(prefix="pydas-basic-"))

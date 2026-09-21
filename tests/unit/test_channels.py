@@ -58,3 +58,10 @@ def test_from_dataframe_and_read_csv(tmp_path):
     loaded = PyDAS.read_csv(str(csv_path), fs=10.0, lam=1.0, units={"eta": "m"})
     assert loaded.__filename__ == str(csv_path)
     np.testing.assert_allclose(loaded.data[0]["eta"], df["eta"].values)
+
+
+def test_snake_case_aliases(pydas_instance):
+    """Historical camelCase methods keep snake_case aliases."""
+    pydas_instance.update_channel_count()
+    pydas_instance.update_statistics(chName="all")
+    assert pydas_instance.__chN__ == len(pydas_instance.chInfo)

@@ -210,8 +210,8 @@ def remove_mean(pydas_obj, chName, sseg=0):
     """
     Remove the mean value from one or more channels.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data
     chName : str or list
@@ -219,8 +219,8 @@ def remove_mean(pydas_obj, chName, sseg=0):
     sseg : int, optional
         Segment index, default is 0
         
-    Raises:
-    -------
+    Raises
+    ------
     ValueError
         If chName is neither a string nor a list
     """
@@ -242,8 +242,8 @@ def add_value(pydas_obj, chName, value2add, sseg=0):
     """
     Add a constant value to one or more channels.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data
     chName : str or list
@@ -253,8 +253,8 @@ def add_value(pydas_obj, chName, value2add, sseg=0):
     sseg : int, optional
         Segment index, default is 0
         
-    Raises:
-    -------
+    Raises
+    ------
     ValueError
         If chName is neither a string nor a list
     """
@@ -274,8 +274,8 @@ def multiply_value(pydas_obj, chName, value2mul, sseg=0):
     """
     Multiply one or more channels by a constant value.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data
     chName : str or list
@@ -285,8 +285,8 @@ def multiply_value(pydas_obj, chName, value2mul, sseg=0):
     sseg : int, optional
         Segment index, default is 0
         
-    Raises:
-    -------
+    Raises
+    ------
     ValueError
         If chName is neither a string nor a list
     """
@@ -306,8 +306,8 @@ def move_data(pydas_obj, chName, point_of_move, sseg=0):
     """
     Move data in a channel by a specified number of points.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data
     chName : str
@@ -317,8 +317,8 @@ def move_data(pydas_obj, chName, point_of_move, sseg=0):
     sseg : int, optional
         Segment index, default is 0
         
-    Raises:
-    -------
+    Raises
+    ------
     KeyError
         If the channel does not exist
     """
@@ -345,8 +345,8 @@ def data_wash(pydas_obj, ChName, method='linear', order=5, threshold=3, sseg=0):
     """
     Clean data by detecting and interpolating outliers.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data
     ChName : str
@@ -360,8 +360,8 @@ def data_wash(pydas_obj, ChName, method='linear', order=5, threshold=3, sseg=0):
     sseg : int, optional
         Segment index to process, default is 0
         
-    Notes:
-    ------
+    Notes
+    -----
     - Uses statistical methods to detect outliers
     - Supports different interpolation methods
     - Optimized for large datasets
@@ -455,8 +455,8 @@ def _data_wash_large(pydas_obj, ChName, method='linear', order=5, threshold=3, s
     Chunked outlier cleaning for very long series.
 
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     Same parameters as data_wash.
     """
     try:
@@ -542,8 +542,8 @@ def add_diff1(pydas_obj, name, sseg=0, filter=False, filter_cutoff=2):
     """
     Calculate and add first derivative of a channel.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data
     name : str
@@ -555,8 +555,8 @@ def add_diff1(pydas_obj, name, sseg=0, filter=False, filter_cutoff=2):
     filter_cutoff : float, optional
         Cutoff frequency for filtering in Hz, default is 2
         
-    Notes:
-    ------
+    Notes
+    -----
     - Uses optimized numerical differentiation
     - Optional lowpass filtering to reduce noise
     - Maintains data alignment
@@ -600,8 +600,8 @@ def add_diff2(pydas_obj, name, sseg=0, filter=False, filter_cutoff=2):
     """
     Calculate and add second derivative of a channel.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data
     name : str
@@ -613,8 +613,8 @@ def add_diff2(pydas_obj, name, sseg=0, filter=False, filter_cutoff=2):
     filter_cutoff : float, optional
         Cutoff frequency for filtering in Hz, default is 2
         
-    Notes:
-    ------
+    Notes
+    -----
     - Uses optimized numerical differentiation
     - Optional lowpass filtering to reduce noise
     - Maintains data alignment

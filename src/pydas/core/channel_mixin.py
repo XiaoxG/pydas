@@ -81,8 +81,17 @@ class ChannelMixin:
         ----------
         sseg : int, optional
             Segment index to process, default is 0.
+
+        Notes
+        -----
+        ``update_channel_count`` is a snake_case alias of this method.
+        The historical name is kept so existing notebooks keep working.
         """
         return _channels.update_channel_count(self, sseg=sseg)
+
+    def update_channel_count(self, sseg=0):
+        """Snake-case alias of :meth:`updateChN`."""
+        return self.updateChN(sseg=sseg)
 
     def rename_channel(self, chOld, chNew, sseg=0):
         """Rename a channel in one segment and in ``chInfo``.

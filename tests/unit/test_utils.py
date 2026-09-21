@@ -2,7 +2,13 @@
 import numpy as np
 
 from pydas.utils import diff1d, data_change_fs, findtrans, get_default_transDict
+import pydas
 import pydas.utils as utils
+
+
+def test_package_version():
+    """Installed / source package version is exported on the package."""
+    assert pydas.__version__ == "1.3.0"
 
 
 def test_diff1d_sine_error():

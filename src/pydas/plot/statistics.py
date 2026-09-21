@@ -21,32 +21,57 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
     """
     Plot a histogram of a channel from a PyDAS object.
     
-    Parameters:
-        pydas_obj (PyDAS): The PyDAS object containing channel data
-        ch_name (str or list): Channel name or list of channel names
-        sseg (int): Segment index to plot (default: 0)
-        title (str): Plot title (default: None, auto-generated)
-        xlabel (str): X-axis label (default: None, auto-generated)
-        ylabel (str): Y-axis label (default: 'Count')
-        bins (int): Number of histogram bins (default: 50)
-        xlim (tuple): X-axis limits as (min, max) (default: None)
-        ylim (tuple): Y-axis limits as (min, max) (default: None)
-        grid (bool): Whether to show grid (default: True)
-        show (bool): Whether to display the plot (default: True)
-        save_path (str): Path to save the plot (default: None)
-        plotbackend (str): Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
-        style (str): Plot style to use (default: None, uses backend's default style)
-        save_html (str): Path to save as interactive HTML (default: None)
-        dpi (int): DPI for saved image (default: 300)
-        width (int): Width in pixels for Plotly plot (default: None)
-        height (int): Height in pixels for Plotly plot (default: None)
-        color (str or list): Histogram color or list of colors (default: None, auto-generated)
-        alpha (float): Histogram transparency (default: 0.6)
-        figsize (tuple): Figure size for matplotlib in inches (default: (12, 6))
-        fit_gaussian (bool): Whether to fit a Gaussian distribution (default: True)
-        fit_color (str or list): Color of Gaussian fit curve (default: 'red')
+    Parameters
+    ----------
+        pydas_obj : PyDAS
+            The PyDAS object containing channel data
+        ch_name : str or list
+            Channel name or list of channel names
+        sseg : int
+            Segment index to plot (default: 0)
+        title : str
+            Plot title (default: None, auto-generated)
+        xlabel : str
+            X-axis label (default: None, auto-generated)
+        ylabel : str
+            Y-axis label (default: 'Count')
+        bins : int
+            Number of histogram bins (default: 50)
+        xlim : tuple
+            X-axis limits as (min, max) (default: None)
+        ylim : tuple
+            Y-axis limits as (min, max) (default: None)
+        grid : bool
+            Whether to show grid (default: True)
+        show : bool
+            Whether to display the plot (default: True)
+        save_path : str
+            Path to save the plot (default: None)
+        plotbackend : str
+            Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
+        style : str
+            Plot style to use (default: None, uses backend's default style)
+        save_html : str
+            Path to save as interactive HTML (default: None)
+        dpi : int
+            DPI for saved image (default: 300)
+        width : int
+            Width in pixels for Plotly plot (default: None)
+        height : int
+            Height in pixels for Plotly plot (default: None)
+        color : str or list
+            Histogram color or list of colors (default: None, auto-generated)
+        alpha : float
+            Histogram transparency (default: 0.6)
+        figsize : tuple
+            Figure size for matplotlib in inches (default: (12, 6))
+        fit_gaussian : bool
+            Whether to fit a Gaussian distribution (default: True)
+        fit_color : str or list
+            Color of Gaussian fit curve (default: 'red')
         
-    Returns:
+    Returns
+    -------
         Figure object (matplotlib.figure.Figure or plotly.graph_objects.Figure)
     """
     try:
@@ -802,55 +827,103 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
     """
     Plot a boxplot of one or multiple channels from a PyDAS object.
     
-    Parameters:
-        pydas_obj (PyDAS): The PyDAS object containing channel data
-        ch_name (str or list): Channel name or list of channel names
-        sseg (int): Segment index to plot (default: 0)
-        title (str): Plot title (default: None, auto-generated)
-        xlabel (str): X-axis label (default: None, auto-generated)
-        ylabel (str): Y-axis label (default: None, auto-generated)
-        xlim (tuple): X-axis limits as (min, max) (default: None)
-        ylim (tuple): Y-axis limits as (min, max) (default: None)
-        grid (bool): Whether to show grid (default: True)
-        show (bool): Whether to display the plot (default: True)
-        save_path (str): Path to save the plot (default: None)
-        plotbackend (str): Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
-        style (str): Plot style to use (default: None, uses backend's default style)
-        save_html (str): Path to save as interactive HTML (default: None, only works with plotly backend)
-        dpi (int): DPI for saved image (default: None, uses CONFIG default)
-        width (int): Width in pixels for plot (default: None)
-        height (int): Height in pixels for plot (default: None)
-        color (str or list): Box color(s) (default: None, auto-generated)
-        alpha (float): Transparency level (default: 0.8)
-        figsize (tuple): Figure size in inches (default: None, uses CONFIG default)
-        notch (bool): Whether to create notched boxes (default: False)
-        vert (bool): For matplotlib, if True, boxes are drawn vertical (default: True)
-        showfliers (bool): Whether to show outliers (default: True)
-        showmeans (bool): Whether to show mean line (default: False)
-        meanline (bool): Whether to show the mean as a line instead of a point (default: False)
-        boxprops (dict): Properties for the box (matplotlib only) (default: None)
-        whiskerprops (dict): Properties for the whiskers (matplotlib only) (default: None)
-        capprops (dict): Properties for the caps (matplotlib only) (default: None)
-        flierprops (dict): Properties for the fliers (matplotlib only) (default: None)
-        medianprops (dict): Properties for the median (matplotlib only) (default: None)
-        meanprops (dict): Properties for the mean (matplotlib only) (default: None)
-        pointpos (float): Position of points in boxplot - 0 means points are placed over the center of the box, negative/positive values offset the points (plotly only) (default: 0)
-        jitter (float): Jitter amount for points (plotly only) (default: 0.3)
-        boxpoints (str): Display mode for points ('all', 'outliers', 'suspectedoutliers', False) (plotly only) (default: 'outliers')
-        quartilemethod (str): Method for computing quartiles (plotly only) (default: 'linear')
-        boxwidth (float): Width of boxes (default: 0.5)
-        orientation (str): 'v' for vertical, 'h' for horizontal (default: None)
-        use_peaks (bool): Whether to use peak values for boxplot instead of all data (default: False)
-        separate_pos_neg_peaks (bool): Whether to separate positive and negative peaks into different boxes (default: False)
-        peak_height (float or tuple): Required height of peaks (default: None)
-        peak_threshold (float or tuple): Required threshold of peaks (default: None)
-        peak_distance (int): Required minimal horizontal distance between peaks (default: None) 
-        peak_prominence (float or tuple): Required prominence of peaks (default: 1.0)
-        peak_width (float or tuple): Required width of peaks (default: None)
-        peak_wlen (int): Window length for peak prominence calculation (default: None)
-        peak_rel_height (float): Relative height for peak width calculation (default: 0.5)
+    Parameters
+    ----------
+        pydas_obj : PyDAS
+            The PyDAS object containing channel data
+        ch_name : str or list
+            Channel name or list of channel names
+        sseg : int
+            Segment index to plot (default: 0)
+        title : str
+            Plot title (default: None, auto-generated)
+        xlabel : str
+            X-axis label (default: None, auto-generated)
+        ylabel : str
+            Y-axis label (default: None, auto-generated)
+        xlim : tuple
+            X-axis limits as (min, max) (default: None)
+        ylim : tuple
+            Y-axis limits as (min, max) (default: None)
+        grid : bool
+            Whether to show grid (default: True)
+        show : bool
+            Whether to display the plot (default: True)
+        save_path : str
+            Path to save the plot (default: None)
+        plotbackend : str
+            Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
+        style : str
+            Plot style to use (default: None, uses backend's default style)
+        save_html : str
+            Path to save as interactive HTML (default: None, only works with plotly backend)
+        dpi : int
+            DPI for saved image (default: None, uses CONFIG default)
+        width : int
+            Width in pixels for plot (default: None)
+        height : int
+            Height in pixels for plot (default: None)
+        color : str or list
+            Box color(s) (default: None, auto-generated)
+        alpha : float
+            Transparency level (default: 0.8)
+        figsize : tuple
+            Figure size in inches (default: None, uses CONFIG default)
+        notch : bool
+            Whether to create notched boxes (default: False)
+        vert : bool
+            For matplotlib, if True, boxes are drawn vertical (default: True)
+        showfliers : bool
+            Whether to show outliers (default: True)
+        showmeans : bool
+            Whether to show mean line (default: False)
+        meanline : bool
+            Whether to show the mean as a line instead of a point (default: False)
+        boxprops : dict
+            Properties for the box (matplotlib only) (default: None)
+        whiskerprops : dict
+            Properties for the whiskers (matplotlib only) (default: None)
+        capprops : dict
+            Properties for the caps (matplotlib only) (default: None)
+        flierprops : dict
+            Properties for the fliers (matplotlib only) (default: None)
+        medianprops : dict
+            Properties for the median (matplotlib only) (default: None)
+        meanprops : dict
+            Properties for the mean (matplotlib only) (default: None)
+        pointpos : float
+            Position of points in boxplot - 0 means points are placed over the center of the box, negative/positive values offset the points (plotly only) (default: 0)
+        jitter : float
+            Jitter amount for points (plotly only) (default: 0.3)
+        boxpoints : str
+            Display mode for points ('all', 'outliers', 'suspectedoutliers', False) (plotly only) (default: 'outliers')
+        quartilemethod : str
+            Method for computing quartiles (plotly only) (default: 'linear')
+        boxwidth : float
+            Width of boxes (default: 0.5)
+        orientation : str
+            'v' for vertical, 'h' for horizontal (default: None)
+        use_peaks : bool
+            Whether to use peak values for boxplot instead of all data (default: False)
+        separate_pos_neg_peaks : bool
+            Whether to separate positive and negative peaks into different boxes (default: False)
+        peak_height : float or tuple
+            Required height of peaks (default: None)
+        peak_threshold : float or tuple
+            Required threshold of peaks (default: None)
+        peak_distance : int
+            Required minimal horizontal distance between peaks (default: None) 
+        peak_prominence : float or tuple
+            Required prominence of peaks (default: 1.0)
+        peak_width : float or tuple
+            Required width of peaks (default: None)
+        peak_wlen : int
+            Window length for peak prominence calculation (default: None)
+        peak_rel_height : float
+            Relative height for peak width calculation (default: 0.5)
         
-    Returns:
+    Returns
+    -------
         object: Figure object or None
     """
     try:

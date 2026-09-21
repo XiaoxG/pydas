@@ -28,20 +28,20 @@ def diff1d(series, dx=1.0):
     - Large arrays (10000-100000): Parallel Numba implementation
     - Huge arrays (> 100000): Optimized parallel Numba implementation
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     series : numpy.ndarray
         Input array to calculate derivative
     dx : float, optional
         Time step, default is 1.0
         
-    Returns:
-    --------
+    Returns
+    -------
     numpy.ndarray
         Derivative array with the same length as input
         
-    Notes:
-    ------
+    Notes
+    -----
     - Uses Numba JIT compilation for performance optimization
     - Automatically handles different array sizes
     - Maintains numerical accuracy for various input sizes
@@ -215,8 +215,8 @@ def data_change_fs(series, fs, fs_new):
     - Large arrays: Parallel Numba implementation
     - Huge arrays: Optimized parallel Numba implementation
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     series : numpy.ndarray
         Input time series data
     fs : float
@@ -224,13 +224,13 @@ def data_change_fs(series, fs, fs_new):
     fs_new : float
         New sampling frequency in Hz
         
-    Returns:
-    --------
+    Returns
+    -------
     numpy.ndarray
         Resampled data at the new sampling frequency
         
-    Notes:
-    ------
+    Notes
+    -----
     - Uses linear interpolation for resampling
     - Automatically selects optimal implementation based on data size
     - Maintains signal integrity during resampling
@@ -374,18 +374,18 @@ def get_default_transDict(g=9.807):
     """
     Get default unit conversion dictionary for scale transformations.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     g : float, optional
         Gravitational acceleration in m/s², default is 9.807
         
-    Returns:
-    --------
+    Returns
+    -------
     dict
         Dictionary of unit conversion rules
         
-    Notes:
-    ------
+    Notes
+    -----
     - Keys are original units
     - Values are lists where:
       * First element is the new unit
@@ -412,8 +412,8 @@ def findtrans(unit, transDict, clear_cache=False):
     """
     Find unit conversion factors for scaling.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     unit : str
         Unit to be converted
     transDict : dict
@@ -421,14 +421,14 @@ def findtrans(unit, transDict, clear_cache=False):
     clear_cache : bool, optional
         Whether to clear the cache, default is False
         
-    Returns:
-    --------
+    Returns
+    -------
     list
         [new_unit, coefficients_array] where coefficients_array contains
         [unit_coeff, rho_power, lambda_power]
     
-    Notes:
-    ------
+    Notes
+    -----
     - Handles composite units with / (division) and . (multiplication)
     - Handles units with numeric suffixes (e.g., m2 for square meters)
     - Includes caching for performance optimization

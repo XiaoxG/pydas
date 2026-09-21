@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.3.0] - 2026-09-21
+
+### Added
+
+- MIT `LICENSE` file matching the `pyproject.toml` classifier.
+- Package `__version__` on `pydas`.
+- `PyDAS.from_dataframe` / `PyDAS.read_csv` for text tables (binary `.out` remains the constructor path).
+- Snake-case aliases `update_channel_count` (`updateChN`) and `update_statistics` (`updateST`); historical names stay.
+- English README rewritten to the real API; Chinese teaching guide `docs/user-guide.md`; `docs/coding-standards.md`.
+- Runnable `examples/basic_usage.py` and `examples/lab_workflow.py`; `examples/README.md`.
+- GitHub Actions pytest workflow on Python 3.11 / 3.12.
+- Shared kernels from the architecture cleanup: `core/state.py`, `core/channels.py`, `core/io_format.py`, `_apply_butterworth`, `_correlation_lag`.
+- Byte-for-byte `.out` pack compatibility test (`tests/unit/test_out_pack_compat.py`).
+
+### Changed
+
+- Version aligned to **1.3.0** (`pyproject.toml` had stayed at 1.1.0 while CHANGELOG already listed 1.2.0).
+- Project URLs point at GitHub `XiaoxG/pydas`.
+- Mixins are thin proxies; public method names and camelCase parameters are unchanged.
+- Docstrings in core / process / analysis / plot unified to NumPy section headers.
+- `cutoffull` documented as full-scale rad/s on the mixin and process APIs.
+
+### Fixed
+
+- Phases 1–2 behaviour fixes now in the same release line: `diff1d` NumPy return, empty-object `data`/`segStatis` lists, `segStatis` column `STD`, `to_mat(filename, sseg)`, `cut_series` indexing, `TimeSeries.tospecdata(method=...)`, `print_info` returning a DataFrame, first `add_channel` on an empty object, plot/spectrum pytest regressions.
+
+### Notes
+
+- The binary `.out` pack layout is frozen. Do not change `core/io_format.py` constants.
+
+---
+
 ## [1.2.0] - 2026-03-09
 
 ### Added

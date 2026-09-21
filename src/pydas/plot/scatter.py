@@ -30,8 +30,8 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
     """
     Create a scatter plot of two channels.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS object
         PyDAS object
     x_ch_name : str
@@ -132,8 +132,8 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
         Whether to ensure plot is square by adjusting axis limits based on the larger range. 
         Only applies when equal_aspect is True. Default is True.
         
-    Returns:
-    --------
+    Returns
+    -------
     object
         matplotlib.figure.Figure or plotly.graph_objects.Figure or None
     """

@@ -200,6 +200,10 @@ class ProcessingMixin:
         """
         return updateST(self, chName=chName, sseg=sseg, engine=engine)
 
+    def update_statistics(self, chName="all", sseg=0, engine="pandas"):
+        """Snake-case alias of :meth:`updateST`."""
+        return self.updateST(chName=chName, sseg=sseg, engine=engine)
+
     def cut_series(self, start, stop, sseg=0):
         """Cut a time series to a specified time range in seconds.
 
@@ -271,9 +275,24 @@ class ProcessingMixin:
         return _channels.channel_apply_function(self, ch, func, new_chName, unit, sseg)
 
     def _findtrans(self, unit, transDict):
-        """Compatibility wrapper for :func:`pydas.utils.findtrans`."""
+        """Compatibility wrapper for :func:`pydas.utils.findtrans`.
+
+        The historical camelCase name is kept; prefer :meth:`_find_trans`
+        in new internal code.
+        """
         return findtrans(unit, transDict)
 
+    def _find_trans(self, unit, trans_dict):
+        """Snake-case alias of :meth:`_findtrans`."""
+        return self._findtrans(unit, trans_dict)
+
     def _get_default_transDict(self, g=9.807):
-        """Compatibility wrapper for :func:`pydas.utils.get_default_transDict`."""
+        """Compatibility wrapper for :func:`pydas.utils.get_default_transDict`.
+
+        Prefer :meth:`_get_default_trans_dict` in new internal code.
+        """
         return get_default_transDict(g)
+
+    def _get_default_trans_dict(self, g=9.807):
+        """Snake-case alias of :meth:`_get_default_transDict`."""
+        return self._get_default_transDict(g=g)

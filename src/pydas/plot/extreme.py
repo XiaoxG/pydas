@@ -19,8 +19,8 @@ def _detect_peaks(data, height=None, threshold=None, distance=None, prominence=N
     """
     A wrapper for scipy.signal.find_peaks to detect peaks in data
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     data : numpy.ndarray
         The data to detect peaks in
     height : float or None, optional
@@ -38,8 +38,8 @@ def _detect_peaks(data, height=None, threshold=None, distance=None, prominence=N
     rel_height : float, optional
         Used to calculate peak width as percentage of its prominence
         
-    Returns:
-    --------
+    Returns
+    -------
     tuple
         (peaks, properties) where peaks is indices of peaks and properties is a dict
         with properties of the peaks

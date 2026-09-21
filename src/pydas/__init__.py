@@ -1,17 +1,24 @@
 """
 PyDAS - Python Data Analysis System
 ====================================
-A comprehensive data analysis system for processing and analyzing
-large time series data in ocean engineering and signal processing.
+Ocean-engineering time-series toolkit: binary ``.out`` I/O, channel
+management, filtering, Froude scaling, spectral/extreme analysis, and
+Excel reporting.
+
+Public exports are ``PyDAS``, ``diff1d``, and ``data_change_fs``.  All
+other operations live on a ``PyDAS`` instance.
 
 Usage::
 
     from pydas import PyDAS
-    data = PyDAS(filename='data.out', lam=36)
+    data = PyDAS(filename="data.out", lam=36)
     data.print_statistics()
+
+See the repository README and ``docs/user-guide.md`` for a full tutorial.
 """
 
 from .core.pydas_obj import PyDAS
 from .utils import diff1d, data_change_fs
 
+__version__ = "1.3.0"
 __all__ = ["PyDAS", "diff1d", "data_change_fs"]

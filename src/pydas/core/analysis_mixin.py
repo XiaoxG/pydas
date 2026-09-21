@@ -13,7 +13,22 @@ class AnalysisMixin:
         """Perform spectral analysis on a single channel.
 
         This method calls :func:`pydas.analysis.spectral_analysis`.
-        ``method='cov'`` uses the autocovariance path; ``method='psd'`` uses Welch.
+        ``method='cov'`` uses the autocovariance path; ``method='psd'`` uses
+        Welch.  ``plotbackend`` selects ``'plotly'``, ``'matplotlib'``,
+        ``'seaborn'``, or *None* (auto).  There is no ``use_plotly`` argument.
+
+        Parameters
+        ----------
+        channel_name : str
+            Channel to analyse.
+        method : {'cov', 'psd'}, optional
+            Spectral estimator, default is ``'cov'``.
+        L : int, optional
+            Lag / window length, default is 1024.
+        plot : bool, optional
+            Draw the spectrum when True.
+        freq_range : tuple, optional
+            Full-scale frequency window in rad/s, default is ``(0, 2)``.
         """
         return spectral_analysis(self, channel_name, method, L, plot, title, save_path,
                                plotbackend, save_html, fullscale, lam, rho, g, freq_range)

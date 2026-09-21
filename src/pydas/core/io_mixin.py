@@ -1,4 +1,8 @@
-"""PyDAS Core - IO Mixin"""
+"""PyDAS Core - IO Mixin
+
+Binary ``.out`` reading and export wrappers.  The on-disk pack layout is
+defined once in :mod:`pydas.core.io_format` and must not change.
+"""
 import os
 import struct
 import numpy as np
@@ -34,8 +38,8 @@ class IOMixin:
         This method reads the file header, channel information, and data segments.
         It populates the object's properties with the read data.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         sseg : int or 'all'
             Selected segment number to load, or 'all' to load all segments
         """
@@ -245,8 +249,8 @@ class IOMixin:
         """
         Write data to a new *.out file.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         filename : str
             Path to the output *.out file
         sseg : int, list, or 'all', optional
@@ -254,8 +258,8 @@ class IOMixin:
         ch : list or 'all', optional
             Channels to write to the file, default is 'all'
         
-        Notes:
-        ------
+        Notes
+        -----
         This method will automatically append '.out' extension if not provided.
         """
         return write_data(self, filename, sseg, ch)
@@ -264,15 +268,15 @@ class IOMixin:
         """
         Export data to DAT file format.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         Time : bool, optional
             If True, include time column in the output, default is True
         sseg : int or 'all', optional
             Segment(s) to export, default is 'all'
             
-        Notes:
-        ------
+        Notes
+        -----
         The output file will be named based on the original filename with
         segment number and scale (model or full) appended.
         """
@@ -299,15 +303,15 @@ class IOMixin:
         """
         Export data to feather file format
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         sseg : int, list, or 'all', optional
             Segment(s) to export
         compression : str, optional
             Compression to use, default is 'zstd', other options include 'lz4' and 'uncompressed'
 
-        Returns:
-        --------
+        Returns
+        -------
         bool
             True if export was successful
         """
@@ -317,8 +321,8 @@ class IOMixin:
         """
         Export data to Apache Parquet file format.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         sseg : int or 'all', optional
             Segment index to export, default is 'all'
         compression : str, optional
@@ -328,8 +332,8 @@ class IOMixin:
             Compression level for 'gzip', 'brotli', and 'zstd' compressors
             Default is 9
             
-        Returns:
-        --------
+        Returns
+        -------
         bool
             True if export was successful
         """
@@ -340,8 +344,8 @@ class IOMixin:
         """
         Export data to HDF5 file format.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         filename : str, optional
             Output filename, if None, an auto-generated name will be used
         sseg : int or 'all', optional
@@ -354,8 +358,8 @@ class IOMixin:
         include_metadata : bool, optional
             Whether to include metadata, default is True
             
-        Returns:
-        --------
+        Returns
+        -------
         bool
             True if export was successful
         """
@@ -366,8 +370,8 @@ class IOMixin:
         """
         Read wave calibration data.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         wavefname : str
             Path to wave calibration file
         sseg : int, optional
@@ -379,8 +383,8 @@ class IOMixin:
         alignFlag : bool, optional
             Whether to align data, default is True
             
-        Notes:
-        ------
+        Notes
+        -----
         - Reads wave calibration data from file
         - Supports data alignment
         - Handles multiple wave gauges
@@ -406,8 +410,8 @@ class IOMixin:
         """
         Read motion data and add as channels.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         motionfname : str
             Path to motion data file
         alignAccName : str, optional
@@ -424,8 +428,8 @@ class IOMixin:
         NameList : list of str, optional
             List of object names to process, default is ['Platform']
             
-        Notes:
-        ------
+        Notes
+        -----
         - Reads motion data from file
         - Supports data alignment and filtering
         - Handles coordinate transformations

@@ -27,45 +27,83 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
     """
     Plot a channel from a PyDAS object, with options for interactive web-based plotting.
     
-    Parameters:
-        pydas_obj (PyDAS): The PyDAS object containing channel data
-        ch_name (str or list): Channel name or list of channel names to plot
-        sseg (int): Segment index to plot (default: 0)
-        title (str): Plot title (default: None, auto-generated)
-        xlabel (str): X-axis label (default: 'Time (s)')
-        ylabel (str): Y-axis label (default: None, auto-generated)
-        xlim (tuple): X-axis limits as (min, max) (default: None)
-        ylim (tuple): Y-axis limits as (min, max) (default: None)
-        grid (bool): Whether to show grid (default: True)
-        show (bool): Whether to display the plot (default: True)
-        save_path (str): Path to save the plot (default: None)
-        plotbackend (str): Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
-        style (str): Plot style to use (default: None, uses backend's default style)
-        downsampling (bool): Whether to downsample large datasets (default: False)
-        max_points (int): Maximum number of points to plot before downsampling (default: 40000)
-        save_html (str): Path to save as interactive HTML (default: None)
-        dpi (int): DPI for saved image (default: None, uses CONFIG default)
-        width (int): Width in pixels for plot (default: None)
-        height (int): Height in pixels for plot (default: None)
-        color (str): Line color (default: None, auto-generated)
-        alpha (float): Line transparency (default: None, uses CONFIG default)
-        linewidth (float): Line width (default: None, uses CONFIG default)
-        figsize (tuple): Figure size in inches (default: None, uses CONFIG default)
-        stats (bool): Whether to include statistics (default: True)
-        table_width (float): Width of the statistics table (default: None, uses CONFIG default)
-        column_widths (list): Column widths for statistics table (default: None)
-        use_dask (bool): Use Dask for large data processing (default: True)
-        use_webgl (bool): Use WebGL for Plotly rendering for better performance (default: True)
-        use_resampler (bool): Use plotly-resampler for dynamic downsampling (default: False)
-        n_shown_samples (int): Number of samples to show initially (default: 5000)
-        chunk_size (int): Chunk size for Dask processing (default: 10000)
-        data_decimation (str or int): Decimation method for large datasets ('auto', 'lttb', or an integer for step) (default: 'auto')
-        fullscale (bool): Whether to use full scale for plotting (default: False)
-        lam (float): Lambda parameter for full scale (default: None)
-        rho (float): Density parameter for full scale (default: 1.025)
-        g (float): Gravitational acceleration for full scale (default: 9.807)
+    Parameters
+    ----------
+        pydas_obj : PyDAS
+            The PyDAS object containing channel data
+        ch_name : str or list
+            Channel name or list of channel names to plot
+        sseg : int
+            Segment index to plot (default: 0)
+        title : str
+            Plot title (default: None, auto-generated)
+        xlabel : str
+            X-axis label (default: 'Time (s)')
+        ylabel : str
+            Y-axis label (default: None, auto-generated)
+        xlim : tuple
+            X-axis limits as (min, max) (default: None)
+        ylim : tuple
+            Y-axis limits as (min, max) (default: None)
+        grid : bool
+            Whether to show grid (default: True)
+        show : bool
+            Whether to display the plot (default: True)
+        save_path : str
+            Path to save the plot (default: None)
+        plotbackend : str
+            Plotting backend to use ('plotly', 'matplotlib', 'seaborn', or None for auto) (default: None)
+        style : str
+            Plot style to use (default: None, uses backend's default style)
+        downsampling : bool
+            Whether to downsample large datasets (default: False)
+        max_points : int
+            Maximum number of points to plot before downsampling (default: 40000)
+        save_html : str
+            Path to save as interactive HTML (default: None)
+        dpi : int
+            DPI for saved image (default: None, uses CONFIG default)
+        width : int
+            Width in pixels for plot (default: None)
+        height : int
+            Height in pixels for plot (default: None)
+        color : str
+            Line color (default: None, auto-generated)
+        alpha : float
+            Line transparency (default: None, uses CONFIG default)
+        linewidth : float
+            Line width (default: None, uses CONFIG default)
+        figsize : tuple
+            Figure size in inches (default: None, uses CONFIG default)
+        stats : bool
+            Whether to include statistics (default: True)
+        table_width : float
+            Width of the statistics table (default: None, uses CONFIG default)
+        column_widths : list
+            Column widths for statistics table (default: None)
+        use_dask : bool
+            Use Dask for large data processing (default: True)
+        use_webgl : bool
+            Use WebGL for Plotly rendering for better performance (default: True)
+        use_resampler : bool
+            Use plotly-resampler for dynamic downsampling (default: False)
+        n_shown_samples : int
+            Number of samples to show initially (default: 5000)
+        chunk_size : int
+            Chunk size for Dask processing (default: 10000)
+        data_decimation : str or int
+            Decimation method for large datasets ('auto', 'lttb', or an integer for step) (default: 'auto')
+        fullscale : bool
+            Whether to use full scale for plotting (default: False)
+        lam : float
+            Lambda parameter for full scale (default: None)
+        rho : float
+            Density parameter for full scale (default: 1.025)
+        g : float
+            Gravitational acceleration for full scale (default: 9.807)
     
-    Returns:
+    Returns
+    -------
         Figure object (matplotlib.figure.Figure or plotly.graph_objects.Figure)
     """
     # Use configured defaults when not specified

@@ -38,8 +38,8 @@ def spectral_analysis(pydas_obj, channel_name: str, method: str = 'cov', L: int 
     """
     Perform spectral analysis on a single channel.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data.
     channel_name : str
@@ -69,13 +69,13 @@ def spectral_analysis(pydas_obj, channel_name: str, method: str = 'cov', L: int 
     freq_range : tuple, optional
         Frequency range in full scale [rad/s], default is (0, 2).
         
-    Returns:
-    --------
+    Returns
+    -------
     spec : waveModel.SpecData1D
         Spectral data object.
         
-    Notes:
-    ------
+    Notes
+    -----
     - Spectral analysis is performed using the waveModel toolkit.
     - Freq_range specifies the valid frequency range in full scale.
     """
@@ -210,8 +210,8 @@ def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization
     """
     Perform time-domain statistical analysis on a channel.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data.
     ch_name : str 
@@ -239,8 +239,8 @@ def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization
     g : float, optional
         Gravitational acceleration [m/s²], default is 9.807.
         
-    Returns:
-    --------
+    Returns
+    -------
     pandas.DataFrame
         DataFrame containing computed statistics.
     """

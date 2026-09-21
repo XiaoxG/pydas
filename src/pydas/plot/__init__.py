@@ -25,8 +25,8 @@ def use_webgl_rendering(fig, data_length=None, threshold=10000):
     """
     Convert a Plotly figure to use WebGL rendering for better performance on large datasets.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     fig : plotly.graph_objects.Figure
         The Plotly figure to optimise.
     data_length : int, optional
@@ -34,8 +34,8 @@ def use_webgl_rendering(fig, data_length=None, threshold=10000):
     threshold : int, optional
         Data-point count above which WebGL rendering is activated, default is 10000.
 
-    Returns:
-    --------
+    Returns
+    -------
     plotly.graph_objects.Figure
         The optimised figure object.
     """
@@ -79,8 +79,8 @@ def create_resampable_plot(x, y, name=None, title=None, n_shown_samples=5000):
     """
     Create a dynamically resampable plot suitable for very large time series datasets.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     x : numpy.ndarray
         X-axis data.
     y : numpy.ndarray
@@ -92,8 +92,8 @@ def create_resampable_plot(x, y, name=None, title=None, n_shown_samples=5000):
     n_shown_samples : int, optional
         Number of samples displayed initially, default is 5000.
 
-    Returns:
-    --------
+    Returns
+    -------
     FigureResampler or None
         Resampable figure object, or *None* if the library is unavailable.
     """
@@ -134,8 +134,8 @@ def lttb_downsample(x, y, n_out):
     Downsample data using the LTTB (Largest-Triangle-Three-Buckets) algorithm,
     preserving the visual shape of the signal.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     x : numpy.ndarray
         X-axis data.
     y : numpy.ndarray
@@ -143,8 +143,8 @@ def lttb_downsample(x, y, n_out):
     n_out : int
         Number of output points.
 
-    Returns:
-    --------
+    Returns
+    -------
     tuple
         ``(x_sampled, y_sampled)`` – downsampled data points.
     """
@@ -401,13 +401,13 @@ def get_plot_backend(backend=None):
     """
     Return the requested plotting backend, falling back to available alternatives.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     backend : str or None
         Backend to use: 'plotly', 'matplotlib', 'seaborn', or *None* (auto-select).
 
-    Returns:
-    --------
+    Returns
+    -------
     str
         Name of the backend that will be used.
     """
@@ -461,15 +461,15 @@ def apply_style(backend, style=None):
     """
     Apply the specified plotting style for the given backend.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     backend : str
         Plotting backend: 'plotly', 'matplotlib', or 'seaborn'.
     style : str or None
         Style name. Uses the default style when *None*.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     if backend is None:
@@ -501,15 +501,15 @@ def validate_channel(pydas_obj, ch_idx):
     """
     Validate and convert channel index or name to channel name.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     pydas_obj : PyDAS
         PyDAS object containing the data
     ch_idx : int, str, or list
         Channel index, name, or list of indices/names
         
-    Returns:
-    --------
+    Returns
+    -------
     str or list or None
         Channel name(s), or None if invalid
     """
