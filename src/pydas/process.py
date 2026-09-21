@@ -9,7 +9,7 @@ import logging
 
 import numpy as np
 import pandas as pd
-from scipy.signal import butter, correlate, filtfilt
+from scipy.signal import butter, correlate, detrend as _scipy_detrend, filtfilt
 
 from .core.state import STATS_COLUMNS, froude_scale_factors
 from .utils import diff1d, findtrans, get_default_transDict
@@ -238,6 +238,43 @@ def remove_mean(pydas_obj, chName, sseg=0):
     else:
         logger.warning('Unknown type for ChName!')
 
+
+def detrend(pydas_obj, chName, kind="linear", sseg=0):
+    """Remove a linear trend or a constant from one or more channels.
+
+    This is independent of quality repair. Use :meth:`PyDAS.apply_repair`
+    for bad-sample replacement.
+
+    Parameters
+    ----------
+    pydas_obj : PyDAS
+        Object containing the data.
+    chName : str or list
+        Channel name(s).
+    kind : {'linear', 'constant'}, optional
+        ``'linear'`` removes a least-squares line (``scipy.signal.detrend``).
+        ``'constant'`` subtracts the mean.
+    sseg : int, optional
+        Segment index, default is 0.
+    """
+    if kind not in ("linear", "constant"):
+        raise ValueError("kind must be 'linear' or 'constant'")
+    if isinstance(chName, str):
+        names = [chName]
+    elif isinstance(chName, list):
+        names = chName
+    else:
+        logger.warning("Unknown type for chName!")
+        return None
+    scipy_kind = "linear" if kind == "linear" else "constant"
+    for name in names:
+        data = np.asarray(pydas_obj.data[sseg][name].values, dtype=float)
+        pydas_obj.data[sseg][name] = _scipy_detrend(data, type=scipy_kind)
+        pydas_obj.updateST(chName=name, sseg=sseg)
+        logger.info("detrend kind=%s channel=%s sseg=%s", kind, name, sseg)
+    return None
+
+
 def add_value(pydas_obj, chName, value2add, sseg=0):
     """
     Add a constant value to one or more channels.
@@ -362,10 +399,11 @@ def data_wash(pydas_obj, ChName, method='linear', order=5, threshold=3, sseg=0):
         
     Notes
     -----
-    - Uses statistical methods to detect outliers
-    - Supports different interpolation methods
-    - Optimized for large datasets
-    - Maintains data continuity
+    Global mean ± ``threshold``·std detector. This is **not** suitable for
+    irregular-wave elevation or first-order load channels: true crests are
+    heavy-tailed and will be treated as outliers. For burst / dropout /
+    clip handling use :meth:`PyDAS.detect_bad_events` and
+    :meth:`PyDAS.apply_repair`. Interpolation here has no length cap.
     """
     try:
         # Check if the channel exists
@@ -553,7 +591,8 @@ def add_diff1(pydas_obj, name, sseg=0, filter=False, filter_cutoff=2):
     filter : bool, optional
         Whether to apply lowpass filter, default is False
     filter_cutoff : float, optional
-        Cutoff frequency for filtering in Hz, default is 2
+        Passed through as ``cutoffull`` (full-scale rad/s), **not** Hertz.
+        Default is 2.
         
     Notes
     -----
@@ -611,7 +650,8 @@ def add_diff2(pydas_obj, name, sseg=0, filter=False, filter_cutoff=2):
     filter : bool, optional
         Whether to apply lowpass filter, default is False
     filter_cutoff : float, optional
-        Cutoff frequency for filtering in Hz, default is 2
+        Passed through as ``cutoffull`` (full-scale rad/s), **not** Hertz.
+        Default is 2.
         
     Notes
     -----
@@ -972,7 +1012,7 @@ def updateST(pydas_obj, chName="all", sseg=0, engine="pandas"):
     engine : {'pandas', 'dask'}, optional
         Statistics backend. Default ``'pandas'`` uses ``DataFrame.agg``.
         ``'dask'`` is optional for very large tables; it falls back to
-        pandas if Dask is not installed.
+        pandas if Dask is not installed. NaN samples are skipped.
     """
     if chName == "all":
         try:

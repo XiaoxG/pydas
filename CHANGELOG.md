@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.4.0] - 2026-09-21
+
+### Added
+
+- Quality pipeline (`pydas.quality` + `QualityMixin`): `detect_bad_events`, `preview_repair`, `apply_repair`, `qc_report`.
+- Events are **runs** (consecutive bad samples), not isolated indices: `spike_burst`, `dropout`, `clip`, with `at_edge`.
+- Default repair policy **`short_only`**: short spike/dropout bursts are filled; medium/long gaps, clip, and edge runs are reported and left unchanged.
+- Interpolator: linear for ``n<=3``, PCHIP for longer short bursts.
+- Multi-channel overlap: short coincident spikes may still be repaired per channel; coincident dropout/clip grades the **segment** `limited` or `bad`.
+- Grades `good` / `repaired` / `limited` / `bad`. Audit table `repair_log` (not stored in `.out`).
+- Independent `detrend(chName, kind='linear'|'constant')`. Not part of repair.
+
+### Changed
+
+- `data_wash` documented as global mean±kσ and **unsuitable** for irregular-wave crests.
+- `add_diff1` / `add_diff2` `filter_cutoff` documented as ``cutoffull`` (full-scale rad/s).
+- `updateST` notes that NaN samples are skipped.
+
+---
+
 ## [1.3.0] - 2026-09-21
 
 ### Added

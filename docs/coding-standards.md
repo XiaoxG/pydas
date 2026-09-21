@@ -52,9 +52,11 @@ contract. Do not name-mangle or rename them.
 - Users import `from pydas import PyDAS` and call instance methods.
 - Mixins stay thin: validate, then `return module.fn(self, ...)`.
 - One implementation per algorithm (`_apply_butterworth`, `_correlation_lag`,
-  `plot.lttb_downsample`, `core.io_format` pack helpers).
+  `plot.lttb_downsample`, `core.io_format` pack helpers, `quality/` detect-repair-assess).
 - Statistics columns are always `Mean`, `STD`, `Max`, `Min`, `Unit`.
 - `data` and `segStatis` are lists of DataFrames, not dicts.
+- Repair audit is `repair_log` on the object, never the frozen `.out` pack.
+- Quality grades are the English ids `good` / `repaired` / `limited` / `bad`.
 
 ## Binary `.out` pack
 

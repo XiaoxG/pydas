@@ -285,7 +285,9 @@ t, eta = wm.spectrum_to_timeseries(w, S, duration=600.0, dt=0.05, seed=1)
 
 **通道：** `add_channel` / `delete_channel` / `select_channels` / `rename_channel` / `change_channel_order` / `copy_channel` / `channel_calculate` / `channel_apply_function` / `updateChN`（别名 `update_channel_count`）
 
-**处理：** `apply_lowpass_filter` / `apply_highpass_filter` / `remove_mean` / `add_value` / `multiply_value` / `move_data` / `data_wash` / `add_diff1` / `add_diff2` / `cut_series` / `move_ccor` / `find_move_ccor` / `fix_unit` / `to_fullscale` / `channel2fullscale` / `updateST`（别名 `update_statistics`）
+**处理：** `apply_lowpass_filter` / `apply_highpass_filter` / `remove_mean` / `detrend` / `add_value` / `multiply_value` / `move_data` / `data_wash` / `add_diff1` / `add_diff2` / `cut_series` / `move_ccor` / `find_move_ccor` / `fix_unit` / `to_fullscale` / `channel2fullscale` / `updateST`（别名 `update_statistics`）
+
+**质量：** `detect_bad_events` / `preview_repair` / `apply_repair` / `qc_report`
 
 **I/O：** `write` / `to_dat` / `to_mat` / `to_feather` / `to_parquet` / `to_hdf5` / `read_waveCal` / `read_motion` / `from_dataframe` / `read_csv`
 
@@ -295,7 +297,28 @@ t, eta = wm.spectrum_to_timeseries(w, S, duration=600.0, dt=0.05, seed=1)
 
 ---
 
-## 13. 常见坑
+## 13. 坏段检测、替换与质量分级
+
+默认只修**短段**（`policy='short_only'`）。中长洞、削波、贴文件头尾的段只进报告，不插值编造波浪。`n≤3` 用线性插值，更长的短 burst 用 PCHIP。多通道同一时刻的短尖刺仍可各修；同一时刻的 dropout/clip 会把**整段**标成 `limited` 或 `bad`。
+
+```python
+events = data.detect_bad_events("eta", tz=1.0)    # 只读，一行一个连续事件
+preview = data.preview_repair("eta", tz=1.0)
+data.apply_repair("eta", tz=1.0, preview=preview)  # 写回 data，追加 repair_log
+qc = data.qc_report(tz=1.0)                       # good / repaired / limited / bad
+
+data.detrend("fx", kind="linear")                 # 独立去趋势，不是 repair 的一部分
+```
+
+旧的 `data_wash` 仍是全局 mean±kσ，**不适合**不规则波 η / 一阶力。`.out` 存不下 mask（pack 冻结），审计在 `repair_log` 或 `qc_report` 的 Excel。
+
+`tz` 是特征周期（秒），用来判断段长相对 `T*`。不传则用零上穿估计，估不出时默认 1 s，并且最多只允许修 5 个点。
+
+相对 `T*` 的段长：短段 `≤0.10 T*` 可替换；中段 `0.10–0.30 T*` 与长段 `>0.30 T*` 只进报告。贴边事件建议 `cut_series`，不要插值。
+
+---
+
+## 14. 常见坑
 
 1. **不要** `PyDAS("file.csv")` 或 `PyDAS("file.mat")`。文本表走 `read_csv` / `from_dataframe`。
 2. **不要** 传 `use_plotly=True`，用 `plotbackend=`。
@@ -306,14 +329,16 @@ t, eta = wm.spectrum_to_timeseries(w, S, duration=600.0, dt=0.05, seed=1)
 7. 统计列是 `STD` 不是 `Std`。
 8. `to_fullscale` 不接收 `lam=`，只读 `__lam__`。
 9. `to_mat(filename=None, sseg=0)` 必须用关键字传 `sseg`，避免把段号当成文件名。
+10. 旧 `data_wash`（全局 3σ）会误伤不规则波峰；坏段请走 `detect_bad_events` / `apply_repair`。
 
 ---
 
-## 14. 仓库地图（给要改代码的人）
+## 15. 仓库地图（给要改代码的人）
 
 ```
 src/pydas/core/     PyDAS 门面、薄 mixin、state / channels / io_format
-src/pydas/process.py    滤波、换算、互相关、updateST
+src/pydas/process.py    滤波、换算、互相关、updateST、detrend
+src/pydas/quality/      坏段检测、短段替换、qc_report
 src/pydas/analysis.py   谱 / 统计 / 极值
 src/pydas/output.py     写出（消费 io_format）
 src/pydas/reporting.py  Excel 报告

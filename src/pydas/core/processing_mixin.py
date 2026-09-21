@@ -14,6 +14,7 @@ from ..process import (
     multiply_value,
     move_data,
     data_wash,
+    detrend,
     add_diff1,
     add_diff2,
     fix_unit,
@@ -161,6 +162,10 @@ class ProcessingMixin:
         """Remove the mean value from one or more channels."""
         return remove_mean(self, chName, sseg)
 
+    def detrend(self, chName, kind="linear", sseg=0):
+        """Remove a linear trend or a constant. Independent of apply_repair."""
+        return detrend(self, chName, kind=kind, sseg=sseg)
+
     def add_value(self, chName, value2add, sseg=0):
         """Add a constant value to one or more channels."""
         return add_value(self, chName, value2add, sseg)
@@ -174,15 +179,24 @@ class ProcessingMixin:
         return move_data(self, chName, point_of_move, sseg)
 
     def data_wash(self, ChName, method="linear", order=5, threshold=3, sseg=0):
-        """Clean data by detecting and interpolating outliers."""
+        """Global 3σ wash. Not suitable for irregular-wave crests.
+
+        Prefer :meth:`detect_bad_events` / :meth:`apply_repair` for bursts.
+        """
         return data_wash(self, ChName, method, order, threshold, sseg)
 
     def add_diff1(self, name, sseg=0, filter=False, filter_cutoff=2):
-        """Calculate and add the first derivative of a channel."""
+        """Calculate and add the first derivative of a channel.
+
+        ``filter_cutoff`` is ``cutoffull`` (full-scale rad/s), not Hertz.
+        """
         return add_diff1(self, name, sseg, filter, filter_cutoff)
 
     def add_diff2(self, name, sseg=0, filter=False, filter_cutoff=2):
-        """Calculate and add the second derivative of a channel."""
+        """Calculate and add the second derivative of a channel.
+
+        ``filter_cutoff`` is ``cutoffull`` (full-scale rad/s), not Hertz.
+        """
         return add_diff2(self, name, sseg, filter, filter_cutoff)
 
     def updateST(self, chName="all", sseg=0, engine="pandas"):

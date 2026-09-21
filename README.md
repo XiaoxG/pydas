@@ -77,7 +77,9 @@ Historical mixin parameter names stay camelCase (`chName`, `chOld`, `newOrder`, 
 
 **Channels:** `add_channel`, `delete_channel`, `select_channels`, `rename_channel`, `change_channel_order`, `copy_channel`, `channel_calculate`, `channel_apply_function`, `updateChN` (alias `update_channel_count`)
 
-**Processing:** `apply_lowpass_filter`, `apply_highpass_filter`, `remove_mean`, `add_value`, `multiply_value`, `move_data`, `data_wash`, `add_diff1`, `add_diff2`, `cut_series`, `move_ccor`, `find_move_ccor`, `fix_unit`, `to_fullscale`, `channel2fullscale`, `updateST` (alias `update_statistics`)
+**Processing:** `apply_lowpass_filter`, `apply_highpass_filter`, `remove_mean`, `detrend`, `add_value`, `multiply_value`, `move_data`, `data_wash`, `add_diff1`, `add_diff2`, `cut_series`, `move_ccor`, `find_move_ccor`, `fix_unit`, `to_fullscale`, `channel2fullscale`, `updateST` (alias `update_statistics`)
+
+**Quality (1.4):** `detect_bad_events`, `preview_repair`, `apply_repair`, `qc_report` (grades `good` / `repaired` / `limited` / `bad`)
 
 **I/O:** `write` (`.out`), `to_dat`, `to_mat`, `to_feather`, `to_parquet`, `to_hdf5`, `read_waveCal`, `read_motion`, classmethods `from_dataframe` / `read_csv`
 
@@ -95,6 +97,19 @@ Report column meanings are documented in Chinese in [`docs/channel_report_metric
 - `spectral_analysis(..., method='cov')` is the autocovariance estimator; `method='psd'` is Welch.
 - `examples/proc.py` is a historical lab notebook (`CaseData`, `addCh`, …). Those names are not on `PyDAS`.
 - The `.out` on-disk layout is **frozen**. Other software reads the same pack. Do not change header widths, reserved bytes, int16 scaling, or 128-byte alignment.
+- `data_wash` is a global 3σ interpolator. Do not use it on irregular-wave crests. Use `detect_bad_events` / `apply_repair` (`short_only`) for bursts. Audit is `repair_log`, not the `.out` file.
+
+## Data quality and short-gap repair
+
+```python
+events = data.detect_bad_events("eta", tz=1.0)   # read-only event table
+preview = data.preview_repair("eta", tz=1.0)     # does not write data
+data.apply_repair("eta", tz=1.0, preview=preview)
+qc = data.qc_report(tz=1.0)                      # good/repaired/limited/bad
+data.detrend("eta", kind="linear")               # independent of repair
+```
+
+Default policy is `short_only`: only short spike/dropout bursts are filled (linear if `n<=3`, otherwise PCHIP). Clip, file-edge runs, and medium/long gaps are reported, not invented. See `docs/user-guide.md`.
 
 ## Package layout
 
@@ -102,7 +117,8 @@ Report column meanings are documented in Chinese in [`docs/channel_report_metric
 src/pydas/
   __init__.py          # PyDAS, diff1d, data_change_fs, __version__
   core/                # PyDAS facade + thin mixins + state / channels / io_format
-  process.py           # filters, scaling, stats, correlation
+  process.py           # filters, scaling, stats, correlation, detrend
+  quality/             # bad-event detection, short-gap repair, qc grades
   analysis.py          # spectral / statistic / extreme analysis
   output.py            # writers that consume core.io_format
   reporting.py         # Excel channel / wave reports
@@ -114,7 +130,7 @@ tests/                 # pytest (tests/legacy is not collected)
 docs/                  # user guide and report metric catalogues
 ```
 
-Mixins on `PyDAS` are thin proxies. Shared kernels live in `core/state.py`, `core/channels.py`, `core/io_format.py`, and `process.py`.
+Mixins on `PyDAS` are thin proxies. Shared kernels live in `core/state.py`, `core/channels.py`, `core/io_format.py`, `process.py`, and `quality/`.
 
 ## Examples
 

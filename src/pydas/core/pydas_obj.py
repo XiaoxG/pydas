@@ -10,14 +10,19 @@ from .channel_mixin import ChannelMixin
 from .io_mixin import IOMixin
 from .plot_mixin import PlotMixin
 from .processing_mixin import ProcessingMixin
+from .quality_mixin import QualityMixin
 from .report_mixin import ReportMixin
 from .state import empty_seg_statis
 from ..logger import setup_logger
+from ..quality.repair import empty_repair_log
 
 logger = logging.getLogger(__name__)
 
 
-class PyDAS(IOMixin, ChannelMixin, ProcessingMixin, PlotMixin, AnalysisMixin, ReportMixin):
+class PyDAS(
+    IOMixin, ChannelMixin, ProcessingMixin, QualityMixin,
+    PlotMixin, AnalysisMixin, ReportMixin,
+):
     """Python Data Analysis System for processing and analyzing time series data."""
 
     def __init__(self, filename=None, lam=1, sseg="all", log_level="info"):
@@ -45,6 +50,7 @@ class PyDAS(IOMixin, ChannelMixin, ProcessingMixin, PlotMixin, AnalysisMixin, Re
         self.__scale__ = "model"
         self.__date__ = ""
         self.__desc__ = ""
+        self.repair_log = empty_repair_log()
 
         if not (isinstance(sseg, int) or sseg == "all"):
             logger.error("Input 'sseg' is illegal (should be int or 'all').")

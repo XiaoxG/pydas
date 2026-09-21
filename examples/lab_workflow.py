@@ -47,7 +47,12 @@ def main(out_dir="."):
     print(loaded.print_info())
     print("Channels:", list(loaded.chInfo["Name"]))
 
+    tz_model = 1.0 / 0.8
+    qc = loaded.qc_report(tz=tz_model)
+    print(qc[["channel", "grade", "n_events", "suggested_action"]].to_string(index=False))
+
     loaded.remove_mean(["eta", "fx"])
+    loaded.detrend(["eta", "fx"], kind="linear")
     # cutoffull is full-scale rad/s; model Hz = cutoffull / 2pi * sqrt(lam)
     loaded.apply_lowpass_filter("eta", cutoffull=2.0, replace=True)
     loaded.update_statistics()

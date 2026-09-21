@@ -20,5 +20,5 @@ See the repository README and ``docs/user-guide.md`` for a full tutorial.
 from .core.pydas_obj import PyDAS
 from .utils import diff1d, data_change_fs
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 __all__ = ["PyDAS", "diff1d", "data_change_fs"]

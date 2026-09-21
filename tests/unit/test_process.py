@@ -8,6 +8,7 @@ from pydas.process import (
     multiply_value,
     move_data,
     data_wash,
+    detrend,
     add_diff1,
     _apply_butterworth,
     _correlation_lag,
@@ -106,6 +107,16 @@ def test_data_wash_removes_inserted_outlier(pydas_instance):
     pydas_instance.data[0].loc[100, ch_name] = 999.0
     data_wash(pydas_instance, ch_name, method="linear", threshold=10.0)
     assert pydas_instance.data[0][ch_name].iloc[100] < 100.0
+
+
+def test_detrend_linear_independent_of_repair(pydas_instance):
+    ch = "Wave1"
+    n = len(pydas_instance.data[0][ch])
+    slope = np.linspace(0.0, 4.0, n)
+    pydas_instance.data[0][ch] = pydas_instance.data[0][ch].to_numpy() + slope
+    detrend(pydas_instance, ch, kind="linear")
+    fitted = np.polyfit(np.arange(n), pydas_instance.data[0][ch].to_numpy(), 1)[0]
+    assert abs(fitted) < 1e-4
 
 
 def test_butterworth_kernel_low_and_high():
