@@ -2,8 +2,11 @@
 import pytest
 import os
 import numpy as np
+from pathlib import Path
 from pydas import PyDAS
 from pydas.analysis import spectral_analysis, statistic_analysis, extreme_analysis
+
+WC01_PATH = Path(__file__).resolve().parents[1] / "legacy" / "WC01.out"
 
 def test_wc01_full_workflow(tmp_path):
     """
@@ -11,10 +14,12 @@ def test_wc01_full_workflow(tmp_path):
     Validates end-to-end functionality including data loading, washing, 
     processing, analysis, reports, and exporting.
     """
-    file_path = "c:/coding/pydas/tests/legacy/WC01.out"
+    if not WC01_PATH.exists():
+        pytest.skip(f"Legacy test file {WC01_PATH} not found")
+
+    file_path = str(WC01_PATH)
     
     # 1. Load Data
-    assert os.path.exists(file_path), f"Test file {file_path} not found"
     data = PyDAS(filename=file_path, lam=25)
     
     # Ensure it's loaded properly
@@ -39,7 +44,7 @@ def test_wc01_full_workflow(tmp_path):
     # Remove mean using full data mode
     data.remove_mean(chName=wave_ch)
     
-    # Apply lowpass filter (e.g., above 3 Hz in model scale is noise)
+    # Apply lowpass filter (e.g. above 3 Hz in model scale is noise)
     data.apply_lowpass_filter(chName=wave_ch, cutoffull=3.0)
     
     # 4. Statistical Analysis
@@ -74,4 +79,3 @@ def test_wc01_full_workflow(tmp_path):
         plot_channel(data, ch_name=wave_ch, plotbackend='matplotlib', show=False)
     finally:
         os.chdir(cwd)
-

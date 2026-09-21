@@ -82,3 +82,19 @@ def test_export_to_hdf5(pydas_instance, tmp_path):
     res = export_to_hdf5(pydas_instance, filename=str(h5_file))
     assert res is True
     assert h5_file.exists()
+
+
+def test_pydas_to_mat_facade_keywords(pydas_instance, tmp_path):
+    """PyDAS.to_mat must forward filename and sseg as keywords."""
+    mat_file = tmp_path / "facade.mat"
+    res = pydas_instance.to_mat(filename=str(mat_file), sseg=0)
+    assert res is True
+    assert mat_file.exists()
+
+
+def test_pydas_to_mat_positional_filename(pydas_instance, tmp_path):
+    """A positional first argument is the output path, not sseg."""
+    mat_file = tmp_path / "positional.mat"
+    res = pydas_instance.to_mat(str(mat_file), sseg=0)
+    assert res is True
+    assert mat_file.exists()

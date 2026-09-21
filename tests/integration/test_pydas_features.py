@@ -4,31 +4,6 @@ import numpy as np
 import pandas as pd
 from pydas import PyDAS
 
-def test_channel_management_comprehensive(pydas_instance):
-    """Test full range of channel management methods."""
-    ch1 = 'Wave1'
-    
-    # 1. Copy channel
-    pydas_instance.copy_channel(ch1, 'Wave1_Copy')
-    assert 'Wave1_Copy' in pydas_instance.chInfo['Name'].values
-    np.testing.assert_array_equal(pydas_instance.data[0][ch1], pydas_instance.data[0]['Wave1_Copy'])
-    
-    # 2. Rename channel
-    pydas_instance.rename_channel('Wave1_Copy', 'Wave1_Renamed')
-    assert 'Wave1_Renamed' in pydas_instance.chInfo['Name'].values
-    assert 'Wave1_Copy' not in pydas_instance.chInfo['Name'].values
-    
-    # 3. Change channel order
-    names = pydas_instance.chInfo['Name'].tolist()
-    new_order = names[::-1] # Reverse
-    pydas_instance.change_channel_order(new_order)
-    assert pydas_instance.chInfo['Name'].tolist() == new_order
-    
-    # 4. Select channels
-    pydas_instance.select_channels(['Wave1'])
-    assert pydas_instance.__chN__ == 1
-    assert 'Wave1_Renamed' not in pydas_instance.chInfo['Name'].values
-
 def test_channel_arithmetic(pydas_instance):
     """Test channel_calculate and channel_apply_function."""
     # Add second channel

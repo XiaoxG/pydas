@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
+Superseded by pytest. This script is kept for historical reference and is
+not collected by the default test run (see pytest.ini norecursedirs).
+
 Main test runner for PyDAS library.
 
 This script runs all tests for the PyDAS library, including:

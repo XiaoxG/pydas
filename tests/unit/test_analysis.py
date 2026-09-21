@@ -64,3 +64,21 @@ def test_extreme_analysis_basic(pydas_instance):
     # Check if peaks were found
     if 'peaks_positive' in res and len(res['peaks_positive']) > 0:
         assert len(res['all_peaks']) > 0
+
+
+def test_spectral_analysis_invalid_channel(pydas_instance):
+    """Unknown channel names return None instead of raising."""
+    spec = spectral_analysis(pydas_instance, channel_name="no_such_channel")
+    assert spec is None
+
+
+def test_spectral_analysis_psd_and_cov(pydas_instance):
+    """Both documented spectral methods must produce a spectrum object."""
+    spec_cov = spectral_analysis(pydas_instance, channel_name="Wave1", method="cov")
+    spec_psd = spectral_analysis(pydas_instance, channel_name="Wave1", method="psd")
+    assert spec_cov is not None
+    assert spec_psd is not None
+    assert len(spec_cov.args) > 0
+    assert len(spec_psd.args) > 0
+    assert len(spec_cov.data) > 0
+    assert len(spec_psd.data) > 0

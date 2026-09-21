@@ -39,9 +39,11 @@ def test_channel_report(pydas_instance, tmp_path):
     pydas_instance.__lam__ = 1.0
     
     # Run channel report
-    # Note: channel_report returns nothing but saves an Excel file
-    channel_report(pydas_instance, output_file=str(out_file), sseg=0, fullscale=False)
+    result = channel_report(
+        pydas_instance, output_file=str(out_file), sseg=0, fullscale=False
+    )
     
+    assert isinstance(result, pd.DataFrame)
     # Check if file was created
     assert out_file.exists()
     assert os.path.getsize(out_file) > 100
@@ -53,8 +55,32 @@ def test_wave_report(pydas_instance, tmp_path):
     pydas_instance.__lam__ = 1.0
     
     # Run wave report
-    wave_report(pydas_instance, ch_name='Wave1', sseg=0, save_path=str(out_file))
+    fig = wave_report(pydas_instance, ch_name='Wave1', sseg=0, save_path=str(out_file))
     
+    assert fig is not None
     # Check if file was created
     assert out_file.exists()
     assert os.path.getsize(out_file) > 100
+
+
+def test_print_info_returns_dataframe(pydas_instance):
+    df = pydas_instance.print_info()
+    assert isinstance(df, pd.DataFrame)
+    assert "Filename" in df.index
+
+
+def test_channel_report_regular_excludes_mpm(pydas_instance, tmp_path):
+    """wave_type='regular' must not include MPM / EEV columns."""
+    out_file = tmp_path / "regular_report.xlsx"
+    result = channel_report(
+        pydas_instance,
+        output_file=str(out_file),
+        sseg=0,
+        fullscale=False,
+        wave_type="regular",
+        include_charts=False,
+    )
+    assert isinstance(result, pd.DataFrame)
+    columns = list(result.columns)
+    for banned in ("MPM_pos", "MPM_neg", "EEV_pos", "EEV_neg"):
+        assert banned not in columns

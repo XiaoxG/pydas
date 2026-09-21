@@ -1,14 +1,16 @@
 # tests/unit/test_process.py
-import pytest
 import numpy as np
 from pydas.process import (
-    apply_lowpass_filter, 
-    apply_highpass_filter, 
-    remove_mean, 
-    add_value, 
+    apply_lowpass_filter,
+    apply_highpass_filter,
+    remove_mean,
+    add_value,
     multiply_value,
-    move_data
+    move_data,
+    data_wash,
+    add_diff1,
 )
+
 
 def test_remove_mean(pydas_instance):
     ch = 'Wave1'
@@ -59,3 +61,45 @@ def test_move_data(pydas_instance):
     assert np.all(new_data[:move_pts] == 0)
     # Remaining should be shifted orig
     np.testing.assert_array_equal(new_data[move_pts:], orig[:-move_pts])
+
+
+def test_highpass_filter_logic(pydas_instance):
+    ch = "Wave1"
+    fs = pydas_instance.__fs__
+    t = np.arange(len(pydas_instance.data[0])) / fs
+    low = np.sin(2 * np.pi * 0.1 * t)
+    high = 0.5 * np.sin(2 * np.pi * 4.0 * t)
+    pydas_instance.data[0][ch] = low + high
+
+    filtered = apply_highpass_filter(
+        pydas_instance, ch, cutoffull=2 * np.pi, replace=False, returnValue=True
+    )
+    assert len(filtered) == len(t)
+    corr_high = np.corrcoef(filtered, high)[0, 1]
+    corr_low = np.corrcoef(filtered, low)[0, 1]
+    assert corr_high > corr_low
+
+
+def test_filter_channel_name_list(pydas_instance):
+    """chName as a list applies the filter to every named channel."""
+    extra = pydas_instance.data[0]["Wave1"].values.copy()
+    pydas_instance.add_channel("Wave2", "m", extra, pydas_instance.__fs__)
+    apply_lowpass_filter(
+        pydas_instance, ["Wave1", "Wave2"], cutoffull=2 * np.pi, replace=True
+    )
+    assert "Wave1" in pydas_instance.data[0].columns
+    assert "Wave2" in pydas_instance.data[0].columns
+
+
+def test_add_diff1_creates_derivative_channel(pydas_instance):
+    ok = add_diff1(pydas_instance, "Wave1")
+    assert ok is True
+    assert "Wave1_d1" in pydas_instance.chInfo["Name"].values
+    assert len(pydas_instance.data[0]["Wave1_d1"]) == len(pydas_instance.data[0]["Wave1"])
+
+
+def test_data_wash_removes_inserted_outlier(pydas_instance):
+    ch_name = "Wave1"
+    pydas_instance.data[0].loc[100, ch_name] = 999.0
+    data_wash(pydas_instance, ch_name, method="linear", threshold=10.0)
+    assert pydas_instance.data[0][ch_name].iloc[100] < 100.0

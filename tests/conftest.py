@@ -54,3 +54,15 @@ def pydas_instance(synthetic_timeseries):
     pydas.add_channel('Wave1', 'm', eta, fs)
     
     return pydas
+
+
+def pytest_collection_modifyitems(config, items):
+    """Assign declared markers from the tests/ directory layout."""
+    for item in items:
+        path = getattr(item, "path", None)
+        rel = path.as_posix() if path is not None else str(item.fspath).replace("\\", "/")
+        names = {marker.name for marker in item.iter_markers()}
+        if "/tests/unit/" in rel and "unit" not in names:
+            item.add_marker(pytest.mark.unit)
+        elif "/tests/integration/" in rel and "integration" not in names:
+            item.add_marker(pytest.mark.integration)
