@@ -10,7 +10,7 @@ import pandas as pd
 import os
 
 # Set up logging
-logger = logging.getLogger('pydas.plot')
+logger = logging.getLogger(__name__)
 
 # Check whether the optional plotly-resampler library is available
 try:

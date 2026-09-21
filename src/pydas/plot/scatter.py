@@ -10,7 +10,7 @@ import os
 
 from . import PLOT_CONFIG, get_plot_backend, apply_style, lttb_downsample
 
-logger = logging.getLogger('pydas.plot.scatter')
+logger = logging.getLogger(__name__)
 
 def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None, 
          xlabel=None, ylabel=None, xlim=None, ylim=None, grid=True, 
@@ -136,7 +136,7 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
     object
         matplotlib.figure.Figure or plotly.graph_objects.Figure or None
     """
-    # 使用配置默认值（如果未指定）
+    # Use configured defaults when not specified
     if dpi is None:
         dpi = PLOT_CONFIG['elements']['dpi']
     if alpha is None:
@@ -242,13 +242,13 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                 step = int(len(df) / max_points)
                 df = df.iloc[::step]
         
-        # 获取实际可用的绘图后端
+        # Resolve the available plotting backend
         backend = get_plot_backend(plotbackend)
         if backend is None:
             logger.error("No available plotting backend found")
             return None
             
-        # 应用样式
+        # Apply style
         apply_style(backend, style)
         
         # Flag to track if we've successfully created a plot
@@ -386,7 +386,7 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                 ax.set_xlabel(xlabel, fontsize=PLOT_CONFIG['font']['size']['label'])
                 ax.set_ylabel(ylabel, fontsize=PLOT_CONFIG['font']['size']['label'])
                 
-                # 设置刻度字体大小
+                # Tick font size
                 ax.tick_params(axis='both', which='major', labelsize=PLOT_CONFIG['font']['size']['tick'])
                 
                 # Set grid
@@ -434,15 +434,15 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                 import plotly.express as px
                 from plotly.subplots import make_subplots
                 
-                # 首先检查是否使用plotly-resampler
+                # Prefer plotly-resampler when requested
                 if use_resampler and HAS_PLOTLY_RESAMPLER and len(df) > 10000:
-                    logger.info(f"使用plotly-resampler处理大数据集XY图 ({len(df)} 点)")
+                    logger.info(f"Using plotly-resampler for large XY plot ({len(df)} points)")
                     
-                    # 创建标题（如果未提供）
+                    # Build a title when none was given
                     if title is None:
                         title = f"XY Plot: {y_ch_name} vs {x_ch_name}"
                     
-                    # 创建可重采样图表
+                    # Build a resampable figure
                     fr = create_resampable_plot(
                         x=df[x_ch_name],
                         y=df[y_ch_name],
@@ -452,7 +452,7 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                     )
                     
                     if fr is not None:
-                        # 配置布局
+                        # Layout
                         x_axis_label = xlabel if xlabel else f"{x_ch_name} ({x_unit})"
                         y_axis_label = ylabel if ylabel else f"{y_ch_name} ({y_unit})"
                         
@@ -464,67 +464,67 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                             height=height
                         )
                         
-                        # 设置坐标轴范围（如果提供）
+                        # Axis limits when provided
                         if xlim:
                             fr.update_xaxes(range=xlim)
                         if ylim:
                             fr.update_yaxes(range=ylim)
                         
-                        # 如果需要，添加回归线
+                        # Optional regression line
                         if fit_line:
                             try:
-                                # 计算线性回归
+                                # Linear regression
                                 from scipy import stats as scipy_stats
                                 
-                                # 移除NaN值
+                                # Drop NaN values
                                 df_clean = df.dropna()
                                 x_fit = df_clean[x_ch_name].values
                                 y_fit = df_clean[y_ch_name].values
                                 
-                                if len(x_fit) > 1:  # 至少需要2个点进行回归
+                                if len(x_fit) > 1:  # need at least two points
                                     slope, intercept, r_value, p_value, std_err = scipy_stats.linregress(x_fit, y_fit)
                                     
-                                    # 创建拟合线
+                                    # Fitted line
                                     x_range = np.linspace(df[x_ch_name].min(), df[x_ch_name].max(), 100)
                                     y_fit_line = intercept + slope * x_range
                                     
-                                    # 添加拟合线到图表
+                                    # Add the fitted line
                                     fr.add_trace(
                                         go.Scatter(
                                             x=x_range,
                                             y=y_fit_line,
                                             mode='lines',
-                                            name=f'拟合线 (y = {slope:.4g}x + {intercept:.4g})',
+                                            name=f'fit (y = {slope:.4g}x + {intercept:.4g})',
                                             line=dict(color=fit_color, width=fit_line_width),
                                             opacity=fit_alpha
                                         )
                                     )
                             except Exception as e:
-                                logger.warning(f"添加拟合线时出错: {e}")
+                                logger.warning(f"Failed to add fitted line: {e}")
                         
-                        # 保存图表（如果需要）
+                        # Save the figure when requested
                         if save_path:
                             try:
-                                # 保存为PNG
+                                # Save PNG
                                 png_path = save_path if save_path.endswith('.png') else save_path + '.png'
                                 fr.write_image(png_path, width=width or 1200, height=height or 800)
-                                logger.info(f"图表已保存至 {png_path}")
+                                logger.info(f"Figure saved to {png_path}")
                             except Exception as e:
-                                logger.warning(f"保存图像失败: {e}")
+                                logger.warning(f"Failed to save image: {e}")
                         
                         if save_html:
                             try:
                                 html_path = save_html if save_html.endswith('.html') else save_html + '.html'
                                 fr.write_html(html_path)
-                                logger.info(f"交互式HTML已保存至 {html_path}")
+                                logger.info(f"Interactive HTML saved to {html_path}")
                             except Exception as e:
-                                logger.warning(f"保存HTML失败: {e}")
+                                logger.warning(f"Failed to save HTML: {e}")
                         
-                        # 显示交互式图表
+                        # Show the interactive figure
                         if show:
                             fr.show_dash()
                         
-                        # 返回数据和图表
+                        # Return data and figure
                         result_df = df.copy()
                         return result_df, fr
                 
@@ -677,8 +677,8 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                         family=PLOT_CONFIG['font']['family'],
                         size=PLOT_CONFIG['font']['size']['medium']
                     ),
-                    # 优化性能设置
-                    uirevision='constant'  # 维持缩放级别
+                    # Performance settings
+                    uirevision='constant'  # keep zoom level
                 )
                 
                 # Set equal aspect ratio if requested
@@ -735,11 +735,11 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                     
                     fig.add_trace(stats_table)
                 
-                # 创建一个应用于每个图的设置字典
+                # Config applied to each figure
                 plot_settings = {
-                    "scrollZoom": True,  # 启用鼠标滚轮缩放
-                    "modeBarButtonsToAdd": ["drawopenpath", "eraseshape"],  # 添加绘图工具
-                    "modeBarButtonsToRemove": ["lasso2d"]  # 移除套索选择
+                    "scrollZoom": True,  # enable scroll-wheel zoom
+                    "modeBarButtonsToAdd": ["drawopenpath", "eraseshape"],  # drawing tools
+                    "modeBarButtonsToRemove": ["lasso2d"]  # drop lasso select
                 }
                 
                 # Save as HTML if requested
@@ -853,7 +853,7 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                 ax.set_xlabel(xlabel, fontsize=PLOT_CONFIG['font']['size']['label'])
                 ax.set_ylabel(ylabel, fontsize=PLOT_CONFIG['font']['size']['label'])
                 
-                # 设置刻度字体大小
+                # Tick font size
                 ax.tick_params(axis='both', which='major', labelsize=PLOT_CONFIG['font']['size']['tick'])
                 
                 # Set grid

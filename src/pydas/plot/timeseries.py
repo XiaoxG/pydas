@@ -15,7 +15,7 @@ from . import (
 )
 from .scatter import _lttb_downsample
 
-logger = logging.getLogger('pydas.plot.timeseries')
+logger = logging.getLogger(__name__)
 
 def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylabel=None, 
               xlim=None, ylim=None, grid=True, show=True, save_path=None, 
@@ -69,7 +69,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
     Returns:
         Figure object (matplotlib.figure.Figure or plotly.graph_objects.Figure)
     """
-    # 使用配置默认值（如果未指定）
+    # Use configured defaults when not specified
     if dpi is None:
         dpi = PLOT_CONFIG['elements']['dpi']
     if alpha is None:
@@ -100,13 +100,13 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
             channel_list = ch_name
             is_list = True
 
-        # 获取实际可用的绘图后端
+        # Resolve the available plotting backend
         backend = get_plot_backend(plotbackend)
         if backend is None:
             logger.error("No available plotting backend found")
             return None
             
-        # 应用样式
+        # Apply style
         apply_style(backend, style)
 
         # Flag to track if we've successfully created a plot
@@ -265,8 +265,8 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                             # Return the resampler figure
                             return fr
                     
-                    # 使用配置的统一处理逻辑后的代码
-                    # ... [保留原有代码中的数据处理逻辑，如Dask处理、下采样等]
+                    # After the unified processing path
+                    # ... keep existing data-processing logic (Dask, downsampling, etc.)
                     # Use Dask for large datasets if enabled
                     very_large_data = data_length > 100000
                     extremely_large_data = data_length > 1000000
@@ -456,8 +456,8 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                         family=PLOT_CONFIG['font']['family'],
                         size=PLOT_CONFIG['font']['size']['medium']
                     ),
-                    # 优化性能设置
-                    uirevision='constant'  # 维持缩放级别
+                    # Performance settings
+                    uirevision='constant'  # keep zoom level
                 )
                 
                 # Update axes
@@ -527,8 +527,8 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                     # Get X-axis data (time)
                     x_data = np.arange(data_length) / pydas_obj.__fs__
                     
-                    # 使用配置的统一处理逻辑后的代码
-                    # ... [保留原有代码的数据处理逻辑，如下采样、Dask等]
+                    # After the unified processing path
+                    # ... keep existing data-processing logic (downsampling, Dask, etc.)
                     # Use Dask for large datasets if enabled
                     very_large_data = data_length > 100000
                     extremely_large_data = data_length > 1000000
@@ -617,7 +617,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                         ylabel = f"{channel_list[0]} ({unit})"
                 ax.set_ylabel(ylabel, fontsize=PLOT_CONFIG['font']['size']['label'])
                 
-                # 设置刻度字体大小
+                # Tick font size
                 ax.tick_params(axis='both', which='major', labelsize=PLOT_CONFIG['font']['size']['tick'])
                 
                 # Set grid
@@ -629,13 +629,13 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                 if ylim is not None:
                     ax.set_ylim(ylim)
                 
-                # 如果需要显示图例
+                # Show legend when requested
                 if is_list:
                     ax.legend(fontsize=PLOT_CONFIG['font']['size']['legend'])
                 
                 # Add statistical information if requested
                 if stats:
-                    # 计算并显示统计信息
+                    # Compute and display statistics
                     if is_list:
                         stats_text = ""
                         for i, channel in enumerate(channel_list):
@@ -650,7 +650,7 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                             stats_text = (f"{channel}: μ={np.mean(data):.4g}, σ={np.std(data):.4g}, "
                                         f"min={np.min(data):.4g}, max={np.max(data):.4g}")
                     
-                    # 在图中添加统计信息文本
+                    # Add statistics text to the figure
                     ax.text(0.05, 0.95, stats_text, transform=ax.transAxes,
                            verticalalignment='top', horizontalalignment='left',
                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.7),

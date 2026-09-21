@@ -12,7 +12,7 @@ import os
 
 from . import PLOT_CONFIG, get_plot_backend, apply_style, lttb_downsample
 
-logger = logging.getLogger('pydas.plot.statistics')
+logger = logging.getLogger(__name__)
 
 def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='Count', 
                 bins=50, xlim=None, ylim=None, grid=True, show=True, save_path=None, 
@@ -68,13 +68,13 @@ def plot_histogram(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel='
             channel_list = ch_name
             is_list = True
 
-        # 获取实际可用的绘图后端
+        # Resolve the available plotting backend
         backend = get_plot_backend(plotbackend)
         if backend is None:
             logger.error("No available plotting backend found")
             return None
             
-        # 应用样式
+        # Apply style
         apply_style(backend, style)
 
         # Flag to track if we've successfully created a plot
@@ -869,12 +869,12 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
             return None
         
         # Determine if single channel or multiple channels
-        # 显式处理单通道情况，避免DataFrame歧义
+        # Handle a single channel explicitly to avoid DataFrame ambiguity
         if isinstance(ch_names, list):
             channel_list = ch_names
             is_list = True
         else:
-            # 如果不是列表，那么是单个通道名（字符串）
+            # A non-list argument is a single channel name
             channel_list = [ch_names]
             is_list = False
         
@@ -884,7 +884,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
             logger.error("No available plotting backend found.")
             return None
         
-        # 确保channel_list中的每个元素都是字符串
+        # Require every channel_list entry to be a string
         for i, ch in enumerate(channel_list):
             if not isinstance(ch, str):
                 logger.warning(f"Channel at index {i} is not a string. Converting to string.")
@@ -911,7 +911,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
         # If backend is plotly
         if backend == 'plotly':
             try:
-                import matplotlib.pyplot as plt  # 导入这里需要的plt
+                import matplotlib.pyplot as plt  # local import used by this backend
                 import plotly.graph_objects as go
                 from plotly.subplots import make_subplots
                 import numpy as np
@@ -927,7 +927,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                 names_list = []
                 
                 for channel in channel_list:
-                    # 确保channel是字符串
+                    # Channel name must be a string
                     channel = str(channel)
                     
                     # Check if channel exists
@@ -938,12 +938,12 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     # Get data
                     raw_data = pydas_obj.data[sseg][channel].dropna()
                     
-                    # 确保数据非空
+                    # Skip empty series
                     if raw_data.empty:
                         logger.warning(f"Channel '{channel}' contains no valid data after dropping NaN values, skipping.")
                         continue
                     
-                    # 获取通道单位
+                    # Channel unit
                     channel_info = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]
                     if channel_info.empty:
                         unit = ""
@@ -951,9 +951,9 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     else:
                         unit = channel_info['Unit'].values[0]
                     
-                    # 判断是否使用峰值分析
+                    # Peak analysis vs full series
                     if use_peaks:
-                        # 检测峰值
+                        # Detect peaks
                         pos_peaks, neg_peaks = _detect_peaks(
                             raw_data, 
                             height=peak_height, 
@@ -965,23 +965,23 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                             rel_height=peak_rel_height
                         )
                         
-                        # 分离正负峰值处理
+                        # Split positive and negative peaks
                         if separate_pos_neg_peaks:
-                            # 如果有正峰值，添加到数据列表
+                            # Append positive peaks
                             if len(pos_peaks) > 0:
                                 data_list.append(pos_peaks)
                                 names_list.append(f"{channel} (+) ({unit})")
                             else:
                                 logger.warning(f"No positive peaks found for channel '{channel}'")
                             
-                            # 如果有负峰值，添加到数据列表
+                            # Append negative peaks
                             if len(neg_peaks) > 0:
                                 data_list.append(neg_peaks)
                                 names_list.append(f"{channel} (-) ({unit})")
                             else:
                                 logger.warning(f"No negative peaks found for channel '{channel}'")
                         else:
-                            # 合并所有峰值
+                            # Combine all peaks
                             all_peaks = np.concatenate([pos_peaks, neg_peaks])
                             if len(all_peaks) > 0:
                                 data_list.append(all_peaks)
@@ -989,11 +989,11 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                             else:
                                 logger.warning(f"No peaks found for channel '{channel}'")
                     else:
-                        # 使用全部数据
+                        # Use the full series
                         data_list.append(raw_data)
                         names_list.append(f"{channel} ({unit})")
                 
-                # 如果没有有效数据，返回None
+                # Nothing to plot
                 if not data_list:
                     logger.error("No valid data to plot")
                     return None
@@ -1024,7 +1024,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                         jitter=jitter,
                         pointpos=pointpos,
                         quartilemethod=quartilemethod,
-                        width=boxwidth,  # 在Plotly中使用width而不是boxwidth
+                        width=boxwidth,  # Plotly uses width, not boxwidth
                         orientation=plot_orientation
                     ))
                 
@@ -1033,7 +1033,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     title = "Boxplot Analysis"
                     if use_peaks:
                         title += " (Peak Values)"
-                    if not is_list and channel_list:  # 确保channel_list非空
+                    if not is_list and channel_list:  # channel_list must be non-empty
                         title += f" - {channel_list[0]}"
                 
                 # Set axis labels
@@ -1129,7 +1129,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                 
                 # Process each channel
                 for channel in channel_list:
-                    # 确保channel是字符串
+                    # Channel name must be a string
                     channel = str(channel)
                     
                     # Check if channel exists
@@ -1140,12 +1140,12 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     # Get data
                     raw_data = pydas_obj.data[sseg][channel].dropna()
                     
-                    # 确保数据非空
+                    # Skip empty series
                     if raw_data.empty:
                         logger.warning(f"Channel '{channel}' contains no valid data after dropping NaN values, skipping.")
                         continue
                     
-                    # 获取通道单位
+                    # Channel unit
                     channel_info = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]
                     if channel_info.empty:
                         unit = ""
@@ -1153,9 +1153,9 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     else:
                         unit = channel_info['Unit'].values[0]
                     
-                    # 判断是否使用峰值分析
+                    # Peak analysis vs full series
                     if use_peaks:
-                        # 检测峰值
+                        # Detect peaks
                         pos_peaks, neg_peaks = _detect_peaks(
                             raw_data, 
                             height=peak_height, 
@@ -1167,23 +1167,23 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                             rel_height=peak_rel_height
                         )
                         
-                        # 分离正负峰值处理
+                        # Split positive and negative peaks
                         if separate_pos_neg_peaks:
-                            # 如果有正峰值，添加到数据列表
+                            # Append positive peaks
                             if len(pos_peaks) > 0:
                                 data_list.append(pos_peaks)
                                 labels.append(f"{channel} (+) ({unit})")
                             else:
                                 logger.warning(f"No positive peaks found for channel '{channel}'")
                             
-                            # 如果有负峰值，添加到数据列表
+                            # Append negative peaks
                             if len(neg_peaks) > 0:
                                 data_list.append(neg_peaks)
                                 labels.append(f"{channel} (-) ({unit})")
                             else:
                                 logger.warning(f"No negative peaks found for channel '{channel}'")
                         else:
-                            # 合并所有峰值
+                            # Combine all peaks
                             all_peaks = np.concatenate([pos_peaks, neg_peaks])
                             if len(all_peaks) > 0:
                                 data_list.append(all_peaks)
@@ -1191,11 +1191,11 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                             else:
                                 logger.warning(f"No peaks found for channel '{channel}'")
                     else:
-                        # 使用全部数据
+                        # Use the full series
                         data_list.append(raw_data)
                         labels.append(f"{channel} ({unit})")
                 
-                # 如果没有有效数据，返回None
+                # Nothing to plot
                 if not data_list:
                     logger.error("No valid data to plot")
                     return None
@@ -1238,7 +1238,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                 )
                 
                 # Set xticks and labels
-                # 先设置ticks，再设置ticklabels
+                # Set ticks before tick labels
                 positions = np.arange(len(labels))
                 if vert:
                     ax.set_xticks(positions)
@@ -1252,7 +1252,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     title = "Boxplot Analysis"
                     if use_peaks:
                         title += " (Peak Values)"
-                    if not is_list and channel_list:  # 确保channel_list非空
+                    if not is_list and channel_list:  # channel_list must be non-empty
                         title += f" - {channel_list[0]}"
                 ax.set_title(title, fontsize=PLOT_CONFIG['font']['size']['title'])
                 
@@ -1312,7 +1312,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                 
                 # Process each channel
                 for channel in channel_list:
-                    # 确保channel是字符串
+                    # Channel name must be a string
                     channel = str(channel)
                     
                     # Check if channel exists
@@ -1323,12 +1323,12 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     # Get data
                     raw_data = pydas_obj.data[sseg][channel].dropna()
                     
-                    # 确保数据非空
+                    # Skip empty series
                     if raw_data.empty:
                         logger.warning(f"Channel '{channel}' contains no valid data after dropping NaN values, skipping.")
                         continue
                     
-                    # 获取通道单位
+                    # Channel unit
                     channel_info = pydas_obj.chInfo[pydas_obj.chInfo['Name'] == channel]
                     if channel_info.empty:
                         unit = ""
@@ -1336,9 +1336,9 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     else:
                         unit = channel_info['Unit'].values[0]
                     
-                    # 判断是否使用峰值分析
+                    # Peak analysis vs full series
                     if use_peaks:
-                        # 检测峰值
+                        # Detect peaks
                         pos_peaks, neg_peaks = _detect_peaks(
                             raw_data, 
                             height=peak_height, 
@@ -1350,23 +1350,23 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                             rel_height=peak_rel_height
                         )
                         
-                        # 分离正负峰值处理
+                        # Split positive and negative peaks
                         if separate_pos_neg_peaks:
-                            # 如果有正峰值，添加到数据列表
+                            # Append positive peaks
                             if len(pos_peaks) > 0:
                                 data_list.append(pos_peaks)
                                 labels.append(f"{channel} (+) ({unit})")
                             else:
                                 logger.warning(f"No positive peaks found for channel '{channel}'")
                             
-                            # 如果有负峰值，添加到数据列表
+                            # Append negative peaks
                             if len(neg_peaks) > 0:
                                 data_list.append(neg_peaks)
                                 labels.append(f"{channel} (-) ({unit})")
                             else:
                                 logger.warning(f"No negative peaks found for channel '{channel}'")
                         else:
-                            # 合并所有峰值
+                            # Combine all peaks
                             all_peaks = np.concatenate([pos_peaks, neg_peaks])
                             if len(all_peaks) > 0:
                                 data_list.append(all_peaks)
@@ -1374,11 +1374,11 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                             else:
                                 logger.warning(f"No peaks found for channel '{channel}'")
                     else:
-                        # 使用全部数据
+                        # Use the full series
                         data_list.append(raw_data)
                         labels.append(f"{channel} ({unit})")
                 
-                # 如果没有有效数据，返回None
+                # Nothing to plot
                 if not data_list:
                     logger.error("No valid data to plot")
                     return None
@@ -1410,7 +1410,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                 if medianprops is not None: box_props['medianprops'] = medianprops
                 if meanprops is not None: box_props['meanprops'] = meanprops
                 
-                # Create the boxplot - 不要在这里设置labels，而是在后面单独设置
+                # Create the boxplot; set labels afterwards
                 bplot = ax.boxplot(data_list, **box_props)
                 
                 # Set colors for boxes
@@ -1423,7 +1423,7 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                     title = "Boxplot Analysis"
                     if use_peaks:
                         title += " (Peak Values)"
-                    if not is_list and channel_list:  # 确保channel_list非空
+                    if not is_list and channel_list:  # channel_list must be non-empty
                         title += f" - {channel_list[0]}"
                 ax.set_title(title, fontsize=PLOT_CONFIG['font']['size']['title'])
                 
@@ -1445,8 +1445,8 @@ def boxplot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel=None, ylabel=
                 if ylim is not None:
                     ax.set_ylim(ylim)
                 
-                # 正确设置ticks和ticklabels
-                positions = range(1, len(labels) + 1)  # boxplot positions从1开始
+                # Set ticks and tick labels
+                positions = range(1, len(labels) + 1)  # matplotlib boxplot positions are 1-based
                 if vert:
                     ax.set_xticks(positions)
                     ax.set_xticklabels(labels, rotation=45 if len(labels) > 3 else 0, 
