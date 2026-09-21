@@ -15,6 +15,9 @@ def test_spectral_analysis_basic(pydas_instance):
     assert hasattr(spec, 'data')  # Energy Density
     assert len(spec.args) > 0
     assert len(spec.data) > 0
+    # Default freq_range is (0, 2) rad/s; lam=1 so the mask is applied as-is.
+    assert np.max(spec.args) <= 2.0 + 1e-9
+    assert len(spec.args) == len(spec.data)
 
 def test_spectral_analysis_fullscale(pydas_instance):
     """Test spectral analysis with fullscale conversion."""

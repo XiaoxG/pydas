@@ -172,11 +172,11 @@ def spectral_analysis(pydas_obj, channel_name: str, method: str = 'cov', L: int 
             spec.args = freqs[idx]
             spec.data = density[idx]
             logger.info(f"Spectral data limited to range {w_range[0]:.3f}-{w_range[1]:.3f} rad/s")
-            
-            # If spec object has other attributes that need to be synchronized, update them too
-            # For example, if spec.S exists, it needs to be updated
-            if hasattr(spec, 'S') and spec.S is not None:
-                spec.S = spec.S[idx]
+            # SpecData1D.S is a property alias of .data. Only slice a real
+            # stored S attribute so the mask is not applied twice.
+            stored_S = spec.__dict__.get('S')
+            if stored_S is not None and len(stored_S) == len(idx):
+                spec.__dict__['S'] = stored_S[idx]
     except Exception as e:
         logger.warning(f"Error applying frequency range limitation: {str(e)}")
     

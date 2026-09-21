@@ -6,6 +6,7 @@ Contains scatter plot and XY plot functions with LTTB downsampling support.
 
 import logging
 import numpy as np
+import pandas as pd
 import os
 
 from . import PLOT_CONFIG, get_plot_backend, apply_style, lttb_downsample
@@ -915,8 +916,8 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
                 logger.error("No available plotting libraries found (matplotlib, seaborn, plotly).")
                 return None
         
-        # Return data and fig object if not showing or just data if showing
-        return None
+        # Return the figure even when show=False (callers still need the object).
+        return fig
         
     except Exception as e:
         logger.error(f"Error in plot_xy: {str(e)}")
