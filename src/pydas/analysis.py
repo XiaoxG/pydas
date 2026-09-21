@@ -21,7 +21,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 from .waveModel import TimeSeries
-from .plot import _plot_statistics_mpl, _plot_statistics_plotly, _detect_peaks, plot_extreme_analysis
+from .plot import (
+    _plot_statistics_mpl,
+    _plot_statistics_plotly,
+    _detect_peaks,
+    plot_extreme_analysis,
+    plot_spectrum,
+)
 
 def spectral_analysis(pydas_obj, channel_name: str, method: str = 'cov', L: int = 1024, 
                       plot: bool = False, title: Optional[str] = None, 
@@ -182,94 +188,20 @@ def spectral_analysis(pydas_obj, channel_name: str, method: str = 'cov', L: int 
     
     # If plotting is requested
     if plot:
-        # Set title
         if title is None:
             title_prefix = "Full Scale " if fullscale else ""
             title = f"{title_prefix}Spectrum of {channel_name}"
-        
-        if plotbackend is None:
-            # Auto-detect: use Plotly if available, else Matplotlib
-            try:
-                import plotly
-                use_plotly = True
-            except ImportError:
-                use_plotly = False
-        else:
-            # Use specified backend
-            use_plotly = plotbackend.lower() == 'plotly'
-        
-        if use_plotly:
-            # Use Plotly for plotting
-            try:
-                import plotly.graph_objects as go
-                
-                # Get frequency and spectral density
-                f = spec.args
-                S = spec.data
-                
-                # Create figure
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=f, y=S, mode='lines', name='Spectrum'
-                ))
-                
-                # Set layout
-                fig.update_layout(
-                    title=title,
-                    xaxis_title='Angular Frequency (rad/s)',
-                    yaxis_title='Spectral Density',
-                    xaxis=dict(range=[w_range[0], min(w_range[1]*1.05, max(f)*1.05)]),
-                    yaxis=dict(range=[0, max(S)*1.05]),
-                    legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="right", x=0.99)
-                )
-                
-                # Display frequency range information
-                range_text = f"Range: {w_range[0]:.2f}-{w_range[1]:.2f} rad/s"
-                fig.add_annotation(
-                    xref="paper", yref="paper",
-                    x=0.02, y=0.98,
-                    text=range_text,
-                    showarrow=False,
-                    font=dict(size=10),
-                    bgcolor="rgba(255,255,255,0.8)"
-                )
-                
-                # Save or display figure
-                if save_html:
-                    fig.write_html(save_html)
-                
-                fig.show()
+        plot_spectrum(
+            spec.args,
+            spec.data,
+            title=title,
+            w_range=w_range,
+            plotbackend=plotbackend,
+            save_path=save_path,
+            save_html=save_html,
+            show=True,
+        )
 
-            except ImportError:
-                logger.warning("Plotly not installed, will use Matplotlib")
-                use_plotly = False
-        
-        if not use_plotly:
-            # Use Matplotlib for plotting
-            import matplotlib.pyplot as plt
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(spec.args, spec.data, 'b-', linewidth=2)
-            ax.set_title(title)
-            ax.set_xlabel('Angular Frequency (rad/s)')
-            ax.set_ylabel('Spectral Density')
-            ax.grid(True, linestyle='--', alpha=0.7)
-            
-            # Set x-axis range to specified frequency range
-            ax.set_xlim(w_range[0], min(w_range[1]*1.05, max(spec.args)*1.05))
-            ax.set_ylim(0, max(spec.data)*1.05)
-            
-            # Display frequency range information
-            range_text = f"Range: {w_range[0]:.2f}-{w_range[1]:.2f} rad/s"
-            ax.text(0.02, 0.98, range_text, transform=ax.transAxes, 
-                   fontsize=9, va='top', ha='left',
-                   bbox=dict(facecolor='white', alpha=0.8, pad=2))
-            plt.show()
-            if save_path:
-                plt.savefig(save_path, dpi=300, bbox_inches='tight')   
-            else:
-                plt.close()
-    
     return spec
 
 def statistic_analysis(pydas_obj, ch_name, sseg=0, advanced=False, visualization=False, bins=50, 

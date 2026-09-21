@@ -197,6 +197,116 @@ def lttb_downsample(x, y, n_out):
     
     return sampled_x, sampled_y
 
+
+def plot_spectrum(
+    freqs,
+    density,
+    title=None,
+    w_range=None,
+    plotbackend=None,
+    save_path=None,
+    save_html=None,
+    show=True,
+):
+    """Plot a 1-D spectrum using the shared plot backend helper.
+
+    Parameters
+    ----------
+    freqs : array-like
+        Angular frequency axis (rad/s).
+    density : array-like
+        Spectral density values.
+    title : str, optional
+        Figure title.
+    w_range : tuple, optional
+        Displayed frequency range ``(min, max)`` in rad/s.
+    plotbackend : str, optional
+        ``'plotly'``, ``'matplotlib'``, ``'seaborn'``, or *None* (auto).
+    save_path : str, optional
+        Path for a static image (matplotlib path).
+    save_html : str, optional
+        Path for an interactive HTML file (plotly path).
+    show : bool, optional
+        Whether to display the figure, default is True.
+
+    Returns
+    -------
+    figure or None
+    """
+    freqs = np.asarray(freqs)
+    density = np.asarray(density)
+    if freqs.size == 0:
+        logger.warning("Empty spectrum; nothing to plot.")
+        return None
+
+    backend = get_plot_backend(plotbackend)
+    if backend is None:
+        logger.error("No available plotting backend found")
+        return None
+
+    if title is None:
+        title = "Spectrum"
+    if w_range is None:
+        w_range = (float(np.min(freqs)), float(np.max(freqs)))
+    x_max = min(w_range[1] * 1.05, float(np.max(freqs)) * 1.05)
+    y_max = float(np.max(density)) * 1.05 if density.size else 1.0
+    range_text = f"Range: {w_range[0]:.2f}-{w_range[1]:.2f} rad/s"
+
+    if backend == "plotly":
+        try:
+            import plotly.graph_objects as go
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=freqs, y=density, mode="lines", name="Spectrum"))
+            fig.update_layout(
+                title=title,
+                xaxis_title="Angular Frequency (rad/s)",
+                yaxis_title="Spectral Density",
+                xaxis=dict(range=[w_range[0], x_max]),
+                yaxis=dict(range=[0, y_max]),
+                legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="right", x=0.99),
+            )
+            fig.add_annotation(
+                xref="paper", yref="paper",
+                x=0.02, y=0.98,
+                text=range_text,
+                showarrow=False,
+                font=dict(size=10),
+                bgcolor="rgba(255,255,255,0.8)",
+            )
+            if save_html:
+                fig.write_html(save_html)
+            if show:
+                fig.show()
+            return fig
+        except ImportError:
+            logger.warning("Plotly not installed, will use Matplotlib")
+            backend = "matplotlib"
+
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(freqs, density, "b-", linewidth=2)
+    ax.set_title(title)
+    ax.set_xlabel("Angular Frequency (rad/s)")
+    ax.set_ylabel("Spectral Density")
+    ax.grid(True, linestyle="--", alpha=0.7)
+    ax.set_xlim(w_range[0], x_max)
+    ax.set_ylim(0, y_max)
+    ax.text(
+        0.02, 0.98, range_text, transform=ax.transAxes,
+        fontsize=9, va="top", ha="left",
+        bbox=dict(facecolor="white", alpha=0.8, pad=2),
+    )
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return fig
+
+
 # Global plot configuration
 PLOT_CONFIG = {
     # Figure size presets
@@ -455,14 +565,18 @@ def validate_channel(pydas_obj, ch_idx):
 # Re-export from submodules for backward compatibility
 from .timeseries import plot_channel
 from .statistics import plot_histogram, _plot_statistics_mpl, _plot_statistics_plotly, boxplot_channel
-from .scatter import plot_xy, _lttb_downsample
+from .scatter import plot_xy
 from .extreme import _detect_peaks, plot_extreme_analysis
+
+# Keep the historical alias so callers of plot._lttb_downsample keep working.
+_lttb_downsample = lttb_downsample
 
 __all__ = [
     # Config
     "PLOT_CONFIG", "DEFAULT_FIGSIZE", "DEFAULT_FONT_SIZE", "DEFAULT_DPI",
     # Utilities
     "use_webgl_rendering", "create_resampable_plot", "lttb_downsample",
+    "plot_spectrum",
     "get_plot_backend", "apply_style", "validate_channel",
     "HAS_PLOTLY_RESAMPLER",
     # Submodule functions

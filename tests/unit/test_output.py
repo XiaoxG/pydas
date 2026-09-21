@@ -98,3 +98,22 @@ def test_pydas_to_mat_positional_filename(pydas_instance, tmp_path):
     res = pydas_instance.to_mat(str(mat_file), sseg=0)
     assert res is True
     assert mat_file.exists()
+
+
+def test_from_dataframe_out_roundtrip(tmp_path):
+    """from_dataframe objects must round-trip through the shared .out packer."""
+    from pydas import PyDAS
+
+    n = 128
+    df = pd.DataFrame({
+        "eta": np.sin(np.linspace(0, 4 * np.pi, n)),
+        "acc": np.cos(np.linspace(0, 4 * np.pi, n)),
+    })
+    obj = PyDAS.from_dataframe(df, fs=20.0, lam=1.0, units={"eta": "m", "acc": "m/s2"})
+    out_file = tmp_path / "from_df.out"
+    write_data(obj, str(out_file))
+    loaded = PyDAS(filename=str(out_file), lam=1.0)
+    assert loaded.__chN__ == 2
+    assert loaded.__fs__ == 20
+    np.testing.assert_allclose(loaded.data[0]["eta"].values, df["eta"].values, rtol=1e-3)
+    np.testing.assert_allclose(loaded.data[0]["acc"].values, df["acc"].values, rtol=1e-3)

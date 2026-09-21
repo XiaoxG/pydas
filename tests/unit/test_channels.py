@@ -37,3 +37,24 @@ def test_copy_rename_reorder_select(pydas_instance):
     pydas_instance.select_channels(["Wave1"])
     assert pydas_instance.__chN__ == 1
     assert "Wave1_Renamed" not in pydas_instance.chInfo["Name"].values
+
+
+def test_from_dataframe_and_read_csv(tmp_path):
+    """CSV/DataFrame construction must not go through binary __read__."""
+    import pandas as pd
+    from pydas import PyDAS
+
+    n = 64
+    df = pd.DataFrame({"eta": np.sin(np.linspace(0, 2 * np.pi, n))})
+    obj = PyDAS.from_dataframe(df, fs=10.0, lam=4.0, units={"eta": "m"})
+    assert obj.__fs__ == 10.0
+    assert obj.__lam__ == 4.0
+    assert "eta" in obj.chInfo["Name"].values
+    assert obj.chInfo.loc[obj.chInfo["Name"] == "eta", "Unit"].values[0] == "m"
+    assert len(obj.data[0]["eta"]) == n
+
+    csv_path = tmp_path / "eta.csv"
+    df.to_csv(csv_path, index=False)
+    loaded = PyDAS.read_csv(str(csv_path), fs=10.0, lam=1.0, units={"eta": "m"})
+    assert loaded.__filename__ == str(csv_path)
+    np.testing.assert_allclose(loaded.data[0]["eta"], df["eta"].values)

@@ -1,6 +1,5 @@
 """PyDAS Core - IO Mixin"""
 import os
-import math
 import struct
 import numpy as np
 import pandas as pd
@@ -14,6 +13,16 @@ from ..output import (
     export_to_parquet, export_to_hdf5
 )
 from ..utils import diff1d, data_change_fs
+from .io_format import (
+    CH_NAME_WIDTH,
+    CH_UNIT_WIDTH,
+    FILE_HEADER_SIZE,
+    align_offset,
+    unpack_channel_names,
+    unpack_channel_units,
+    unpack_file_header,
+    unpack_seg_header,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,30 +41,28 @@ class IOMixin:
         """
         with open(self.__filename__, 'rb') as fIn:
             # Read file header (256 bytes)
-            fmtstr = '=hhlhh2s2s240s'
-            buf = fIn.read(256)
+            buf = fIn.read(FILE_HEADER_SIZE)
             if not buf:
                 logger.warning(f"Reading data file {self.__filename__} failed, exiting...")
                 return None
                 
-            # Unpack header data
-            tmp = struct.unpack(fmtstr, buf)
-            index, self.__chN__, self.__fs__, self.__segN__ = tmp[0], tmp[1], tmp[3], tmp[4]
-            
-            # Extract date information
-            datemm, datedd = tmp[5].decode('utf-8'), tmp[6].decode('utf-8')
-            self.__date__ = f'{datemm}-{datedd}'
-            
-            # Extract global description
-            self.__desc__ = tmp[7].decode('utf-8').rstrip()
+            header = unpack_file_header(buf)
+            index = header["index"]
+            self.__chN__ = header["chN"]
+            self.__fs__ = header["fs"]
+            self.__segN__ = header["segN"]
+            self.__date__ = f'{header["date_mm"]}-{header["date_dd"]}'
+            self.__desc__ = header["desc"]
 
             # Read channel names (16 bytes per channel)
-            chName = [namei.decode('utf-8').rstrip() for namei in
-                      struct.unpack(self.__chN__ * '16s', fIn.read(self.__chN__ * 16))]
+            chName = unpack_channel_names(
+                fIn.read(self.__chN__ * CH_NAME_WIDTH), self.__chN__
+            )
             
             # Read channel units (4 bytes per channel)
-            chUnit = [uniti.decode('utf-8').rstrip() for uniti in
-                      struct.unpack(self.__chN__ * '4s', fIn.read(self.__chN__ * 4))]
+            chUnit = unpack_channel_units(
+                fIn.read(self.__chN__ * CH_UNIT_WIDTH), self.__chN__
+            )
             
             # Read channel coefficients (4 bytes per channel)
             chCoef = struct.unpack('=' + self.__chN__ * 'f',
@@ -90,14 +97,13 @@ class IOMixin:
             for iseg in range(self.__segN__):
                 # Align to 128-byte boundary
                 p_cur = fIn.tell()
-                aligned_pos = 128 * math.ceil(p_cur / 128)
+                aligned_pos = align_offset(p_cur)
                 fIn.seek(aligned_pos)
                 segment_positions.append(aligned_pos)
 
                 # Read segment information (256 bytes)
-                fmtstr = '=hhlBBBBBBBB240s'
-                buf = fIn.read(256)
-                segInfo[iseg] = struct.unpack(fmtstr, buf)
+                buf = fIn.read(FILE_HEADER_SIZE)
+                segInfo[iseg] = unpack_seg_header(buf)
 
                 # Extract segment details
                 segChN = segInfo[iseg][1]  # Number of channels in this segment

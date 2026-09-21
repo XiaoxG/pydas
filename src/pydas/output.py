@@ -7,11 +7,20 @@ import logging
 import os
 import datetime
 import re
-import math
 import struct
 import numpy as np
 import pandas as pd
 import scipy.io as sio
+
+from .core.io_format import (
+    FILE_HEADER_SIZE,
+    INT16_SCALE,
+    align_offset,
+    pack_channel_names,
+    pack_channel_units,
+    pack_file_header,
+)
+from .core.state import normalize_sseg
 
 logger = logging.getLogger(__name__)
 
@@ -38,49 +47,38 @@ def write_data(pydas_obj, filename, sseg='all', ch='all'):
     if not filename.endswith('.out'):
         filename += '.out'
 
-    # Determine which segments to write
-    if sseg == 'all':
-        sseg = list(range(pydas_obj.__segN__))
-    elif isinstance(sseg, int):
-        sseg = [sseg]
-    else:
-        logger.warning("Unsupported segment number, using 'all'.")
-        sseg = list(range(pydas_obj.__segN__))
+    sseg = normalize_sseg(pydas_obj, sseg, on_invalid='all')
 
     logger.info(f'Saving segment(s) No. {sseg} to file {filename}')
 
     with open(filename, 'wb') as fOut:
-        # Write file header (256 bytes)
-        datemmdd = pydas_obj.__date__.split('-')
+        date_parts = (pydas_obj.__date__ or "01-01").split("-")
+        date_mm = date_parts[0] if date_parts else "01"
+        date_dd = date_parts[1] if len(date_parts) > 1 else "01"
 
-        # Pack header information
-        buf = struct.pack('=hhlhh',
-                          -2,                    # File format version
-                          pydas_obj.__chN__,     # Number of channels
-                          0x0d,                  # Reserved
-                          int(pydas_obj.__fs__), # Sampling frequency
-                          len(sseg))             # Number of segments
-
-        # Pack date and description
-        buf += struct.pack('2s2s240s',
-                           datemmdd[0].encode('utf-8'),
-                           datemmdd[1].encode('utf-8'),
-                           pydas_obj.__desc__.encode('utf-8')).replace(b'\x00', b' ')
+        buf = pack_file_header(
+            pydas_obj.__chN__,
+            pydas_obj.__fs__,
+            len(sseg),
+            date_mm,
+            date_dd,
+            pydas_obj.__desc__,
+        )
 
         # Write header
-        if fOut.write(buf) != 256:
+        if fOut.write(buf) != FILE_HEADER_SIZE:
             logger.error("Error when saving out file!")
             raise IOError("Failed to write file header")
 
         # Write channel names (16 bytes per channel)
-        fOut.write(struct.pack(pydas_obj.__chN__ * '16s',
-                               *[pydas_obj.chInfo['Name'].iloc[i].encode('utf-8')
-                                 for i in range(pydas_obj.__chN__)]).replace(b'\x00', b' '))
+        fOut.write(pack_channel_names(
+            [pydas_obj.chInfo['Name'].iloc[i] for i in range(pydas_obj.__chN__)]
+        ))
 
         # Write channel units (4 bytes per channel)
-        fOut.write(struct.pack(pydas_obj.__chN__ * '4s',
-                               *[pydas_obj.chInfo['Unit'].iloc[i].encode('utf-8')
-                                 for i in range(pydas_obj.__chN__)]).replace(b'\x00', b' '))
+        fOut.write(pack_channel_units(
+            [pydas_obj.chInfo['Unit'].iloc[i] for i in range(pydas_obj.__chN__)]
+        ))
 
         # Calculate new coefficients for optimal data range
         # Find maximum absolute value for each channel across selected segments
@@ -89,7 +87,7 @@ def write_data(pydas_obj, filename, sseg='all', ch='all'):
             axis=0)
 
         # Calculate coefficients to scale data to 16-bit range (-32767 to 32767)
-        chCoef_ = (chMagMax / 32767).astype(np.float32)
+        chCoef_ = (chMagMax / INT16_SCALE).astype(np.float32)
 
         # Write channel coefficients (4 bytes per channel)
         fOut.write(struct.pack('=' + pydas_obj.__chN__ * 'f', *chCoef_))
@@ -101,7 +99,7 @@ def write_data(pydas_obj, filename, sseg='all', ch='all'):
         for iseg in sseg:
             # Align to 128-byte boundary
             p_cur = fOut.tell()
-            fOut.seek(128 * math.ceil(p_cur / 128))
+            fOut.seek(align_offset(p_cur))
 
             # Write segment information (256 bytes)
             fOut.write(struct.pack('=h', pydas_obj.segInfo['Type'].iloc[iseg]))

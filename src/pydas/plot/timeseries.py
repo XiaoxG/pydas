@@ -13,7 +13,6 @@ from . import (
     use_webgl_rendering, create_resampable_plot, HAS_PLOTLY_RESAMPLER,
     lttb_downsample,
 )
-from .scatter import _lttb_downsample
 
 logger = logging.getLogger(__name__)
 
@@ -291,12 +290,12 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                                     # Use LTTB algorithm for large datasets
                                     if data_length > max_points:
                                         logger.info(f"Using LTTB downsampling for channel '{channel}' from {data_length} to {max_points} points.")
-                                        x_down, y_down = _lttb_downsample(x_data, y_data.values, max_points)
+                                        x_down, y_down = lttb_downsample(x_data, y_data.values, max_points)
                                         x_data, y_data = x_down, y_down
                                 elif data_decimation == 'lttb':
                                     # Force LTTB algorithm
                                     logger.info(f"Using LTTB downsampling for channel '{channel}' from {data_length} to {max_points} points.")
-                                    x_down, y_down = _lttb_downsample(x_data, y_data.values, max_points)
+                                    x_down, y_down = lttb_downsample(x_data, y_data.values, max_points)
                                     x_data, y_data = x_down, y_down
                                 elif isinstance(data_decimation, int):
                                     # Use step-based decimation with specific step
@@ -544,12 +543,12 @@ def plot_channel(pydas_obj, ch_name, sseg=0, title=None, xlabel='Time (s)', ylab
                                     # Use LTTB algorithm for large datasets
                                     if data_length > max_points:
                                         logger.info(f"Using LTTB downsampling for channel '{channel}' from {data_length} to {max_points} points.")
-                                        x_down, y_down = _lttb_downsample(x_data, y_data.values, max_points)
+                                        x_down, y_down = lttb_downsample(x_data, y_data.values, max_points)
                                         x_data, y_data = x_down, y_down
                                 elif data_decimation == 'lttb':
                                     # Force LTTB algorithm
                                     logger.info(f"Using LTTB downsampling for channel '{channel}' from {data_length} to {max_points} points.")
-                                    x_down, y_down = _lttb_downsample(x_data, y_data.values, max_points)
+                                    x_down, y_down = lttb_downsample(x_data, y_data.values, max_points)
                                     x_data, y_data = x_down, y_down
                                 elif isinstance(data_decimation, int):
                                     # Use step-based decimation with specific step

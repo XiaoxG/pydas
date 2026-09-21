@@ -9,6 +9,9 @@ from pydas.process import (
     move_data,
     data_wash,
     add_diff1,
+    _apply_butterworth,
+    _correlation_lag,
+    find_move_ccor,
 )
 
 
@@ -103,3 +106,32 @@ def test_data_wash_removes_inserted_outlier(pydas_instance):
     pydas_instance.data[0].loc[100, ch_name] = 999.0
     data_wash(pydas_instance, ch_name, method="linear", threshold=10.0)
     assert pydas_instance.data[0][ch_name].iloc[100] < 100.0
+
+
+def test_butterworth_kernel_low_and_high():
+    """High/low-pass wrappers share one Butterworth kernel."""
+    fs = 50.0
+    t = np.arange(0, 4.0, 1.0 / fs)
+    low = np.sin(2 * np.pi * 0.5 * t)
+    high = np.sin(2 * np.pi * 8.0 * t)
+    mixed = low + high
+    lp = _apply_butterworth(mixed, cutoff=2.0, fs=fs, order=6, btype="low")
+    hp = _apply_butterworth(mixed, cutoff=2.0, fs=fs, order=6, btype="high")
+    assert np.corrcoef(lp, low)[0, 1] > np.corrcoef(lp, high)[0, 1]
+    assert np.corrcoef(hp, high)[0, 1] > np.corrcoef(hp, low)[0, 1]
+
+
+def test_correlation_lag_shared_by_find_move(pydas_instance):
+    """find_move_ccor is the negated raw lag from _correlation_lag."""
+    orig = pydas_instance.data[0]["Wave1"].values
+    shifted = np.roll(orig, 10)
+    pydas_instance.add_channel("Wave1_Shifted", "m", shifted, pydas_instance.__fs__)
+    n_sample = int(pydas_instance.segInfo["N sample"].iloc[0])
+    raw_lag, _ = _correlation_lag(
+        pydas_instance.data[0]["Wave1_Shifted"].values,
+        pydas_instance.data[0]["Wave1"].values,
+        n_sample,
+    )
+    found = find_move_ccor(pydas_instance, "Wave1_Shifted", "Wave1")
+    assert found == -raw_lag
+    assert abs(found) > 0

@@ -236,7 +236,7 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
             
             if sampling_algorithm == 'lttb' and len(df) > max_points:
                 # Largest Triangle Three Buckets algorithm
-                df_downsampled = _lttb_downsample(df[x_ch_name].values, df[y_ch_name].values, max_points)
+                df_downsampled = lttb_downsample(df[x_ch_name].values, df[y_ch_name].values, max_points)
                 df = pd.DataFrame({x_ch_name: df_downsampled[0], y_ch_name: df_downsampled[1]})
             else:
                 # Simple uniform downsampling
@@ -924,94 +924,3 @@ def plot_xy(pydas_obj, x_ch_name, y_ch_name, sseg=0, title=None,
         import traceback
         logger.debug(traceback.format_exc())
         return None
-
-def _lttb_downsample(data_x, data_y, n_out):
-    """
-    Downsample data using the Largest Triangle Three Buckets algorithm.
-    This algorithm preserves the visual characteristics of the data.
-    
-    Parameters:
-    -----------
-    data_x : array-like
-        X-coordinates of the data points
-    data_y : array-like
-        Y-coordinates of the data points
-    n_out : int
-        Number of output points
-        
-    Returns:
-    --------
-    tuple
-        (x_downsampled, y_downsampled) - downsampled data points
-    """
-    n = len(data_x)
-    if n <= n_out:
-        return data_x, data_y
-    
-    # Convert to numpy arrays if not already
-    data_x = np.asarray(data_x)
-    data_y = np.asarray(data_y)
-    
-    # Create output arrays for downsampled data
-    out_x = np.zeros(n_out)
-    out_y = np.zeros(n_out)
-    
-    # Always include the first point
-    out_x[0] = data_x[0]
-    out_y[0] = data_y[0]
-    
-    # Always include the last point
-    out_x[n_out-1] = data_x[n-1]
-    out_y[n_out-1] = data_y[n-1]
-    
-    # If output size is 2, we're done
-    if n_out == 2:
-        return out_x, out_y
-    
-    # Bucket size
-    bucket_size = (n - 2) / (n_out - 2)
-    
-    # Process all other output points
-    for i in range(1, n_out-1):
-        # Calculate bucket range
-        bucket_start = int((i - 1) * bucket_size) + 1
-        bucket_end = int(i * bucket_size) + 1
-        
-        # Ensure bucket_end doesn't exceed array bounds
-        if bucket_end >= n:
-            bucket_end = n - 1
-        
-        # Point from the previous bucket
-        prev_x = out_x[i-1]
-        prev_y = out_y[i-1]
-        
-        # Calculate areas of triangles formed by the point from the previous bucket,
-        # the point from the next bucket, and each point in the current bucket
-        max_area = -1
-        max_area_idx = bucket_start
-        
-        # Find the point in the bucket with the largest triangle area
-        for j in range(bucket_start, bucket_end):
-            # For the last point in the output, compare with the actual last point of the input
-            if i == n_out - 2:
-                next_x = data_x[n-1]
-                next_y = data_y[n-1]
-            else:
-                # Otherwise, compare with a representative point from the next bucket
-                next_x = data_x[bucket_end]
-                next_y = data_y[bucket_end]
-            
-            # Calculate triangle area
-            area = abs((prev_x - next_x) * (data_y[j] - prev_y) - 
-                       (prev_x - data_x[j]) * (next_y - prev_y)) * 0.5
-            
-            # Update if this is the largest area so far
-            if area > max_area:
-                max_area = area
-                max_area_idx = j
-        
-        # Save the point with the largest area
-        out_x[i] = data_x[max_area_idx]
-        out_y[i] = data_y[max_area_idx]
-    
-    return out_x, out_y

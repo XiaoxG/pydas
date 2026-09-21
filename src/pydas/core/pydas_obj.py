@@ -2,6 +2,7 @@
 import logging
 import os
 
+import numpy as np
 import pandas as pd
 
 from .analysis_mixin import AnalysisMixin
@@ -10,11 +11,10 @@ from .io_mixin import IOMixin
 from .plot_mixin import PlotMixin
 from .processing_mixin import ProcessingMixin
 from .report_mixin import ReportMixin
+from .state import empty_seg_statis
 from ..logger import setup_logger
 
 logger = logging.getLogger(__name__)
-
-STATS_COLUMNS = ["Mean", "STD", "Max", "Min", "Unit"]
 
 
 class PyDAS(IOMixin, ChannelMixin, ProcessingMixin, PlotMixin, AnalysisMixin, ReportMixin):
@@ -61,7 +61,7 @@ class PyDAS(IOMixin, ChannelMixin, ProcessingMixin, PlotMixin, AnalysisMixin, Re
             self.__segN__ = 1
             self.chInfo = pd.DataFrame(columns=["Name", "Unit", "Coef"])
             self.data = [pd.DataFrame()]
-            self.segStatis = [pd.DataFrame(columns=STATS_COLUMNS)]
+            self.segStatis = [empty_seg_statis()]
             self.segInfo = pd.DataFrame(
                 [{
                     "Type": 0,
@@ -78,3 +78,64 @@ class PyDAS(IOMixin, ChannelMixin, ProcessingMixin, PlotMixin, AnalysisMixin, Re
                 "Created empty PyDAS object. Use add_channel() to set data "
                 "or pass a .out filename."
             )
+
+    @classmethod
+    def from_dataframe(cls, df, fs, lam=1, units=None, desc="", date="01-01"):
+        """Build a PyDAS object from a DataFrame of channel columns.
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            Each column becomes a channel. All columns must be numeric.
+        fs : float
+            Sampling frequency in Hz.
+        lam : float, optional
+            Scale factor, default is 1.
+        units : dict, optional
+            Mapping of column name to unit string. Missing names use ``'-'``.
+        desc : str, optional
+            File description stored on the object.
+        date : str, optional
+            ``MM-DD`` date stamp used when writing ``.out`` files.
+
+        Returns
+        -------
+        PyDAS
+        """
+        if df is None or getattr(df, "empty", True):
+            raise ValueError("DataFrame is empty")
+        obj = cls(filename=None, lam=lam)
+        obj.__fs__ = float(fs)
+        obj.__desc__ = desc or ""
+        obj.__date__ = date or "01-01"
+        units = units or {}
+        for name in df.columns:
+            series = np.asarray(df[name].values, dtype=np.float64)
+            obj.add_channel(str(name), units.get(name, "-"), series, obj.__fs__)
+        return obj
+
+    @classmethod
+    def read_csv(cls, filename, fs, lam=1, units=None, **kwargs):
+        """Read a CSV/TSV file into a PyDAS object via :meth:`from_dataframe`.
+
+        Parameters
+        ----------
+        filename : str
+            Path to a delimited text file.
+        fs : float
+            Sampling frequency in Hz.
+        lam : float, optional
+            Scale factor, default is 1.
+        units : dict, optional
+            Mapping of column name to unit string.
+        **kwargs
+            Forwarded to ``pandas.read_csv``.
+
+        Returns
+        -------
+        PyDAS
+        """
+        df = pd.read_csv(filename, **kwargs)
+        obj = cls.from_dataframe(df, fs=fs, lam=lam, units=units)
+        obj.__filename__ = filename
+        return obj
