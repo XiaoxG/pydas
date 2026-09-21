@@ -20,7 +20,6 @@ from .core.io_format import (
     pack_channel_units,
     pack_file_header,
 )
-from .core.state import normalize_sseg
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +46,25 @@ def write_data(pydas_obj, filename, sseg='all', ch='all'):
     if not filename.endswith('.out'):
         filename += '.out'
 
-    sseg = normalize_sseg(pydas_obj, sseg, on_invalid='all')
+    # Segment selection is part of the historical writer contract used by
+    # other software. Keep the original branches so on-disk bytes do not
+    # change: a list is treated as unsupported and falls back to 'all'.
+    if sseg == 'all':
+        sseg = list(range(pydas_obj.__segN__))
+    elif isinstance(sseg, int):
+        sseg = [sseg]
+    else:
+        logger.warning("Unsupported segment number, using 'all'.")
+        sseg = list(range(pydas_obj.__segN__))
 
     logger.info(f'Saving segment(s) No. {sseg} to file {filename}')
 
     with open(filename, 'wb') as fOut:
-        date_parts = (pydas_obj.__date__ or "01-01").split("-")
-        date_mm = date_parts[0] if date_parts else "01"
-        date_dd = date_parts[1] if len(date_parts) > 1 else "01"
+        # Date fields are 2-byte MM and DD. Empty objects fall back to 01-01
+        # so packing does not crash; populated dates pack exactly as before.
+        datemmdd = (pydas_obj.__date__ or "01-01").split("-")
+        date_mm = datemmdd[0]
+        date_dd = datemmdd[1] if len(datemmdd) > 1 else "01"
 
         buf = pack_file_header(
             pydas_obj.__chN__,

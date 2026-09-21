@@ -1,7 +1,8 @@
 """Binary ``.out`` pack layout used by both the reader and the writer.
 
-Keep the on-disk format in one module so ``__read__`` and ``write_data``
-cannot drift apart.
+The on-disk layout is frozen. Other software reads this format, so field
+widths, endianness, reserved bytes, padding, and alignment must not change.
+Keep pack and unpack in this one module so they cannot drift apart.
 """
 import math
 import struct
