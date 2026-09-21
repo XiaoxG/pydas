@@ -82,11 +82,11 @@ class IOMixin:
             dataRaw = [[] for _ in range(self.__segN__)]  # Raw data
             note = [[] for _ in range(self.__segN__)]  # Notes for each segment
             
-            # 记录文件位置，用于后续内存映射
+            # Record on-disk offsets for later memmap reads
             segment_positions = []
             segment_sizes = []
 
-            # 首先读取所有段的信息，但不立即读取数据
+            # Read segment headers first; defer sample payloads
             for iseg in range(self.__segN__):
                 # Align to 128-byte boundary
                 p_cur = fIn.tell()
@@ -109,34 +109,34 @@ class IOMixin:
                 buf = fIn.read(segChN * (2 * 3 + 4))
                 segStatis[iseg] = struct.unpack(fmtstr, buf)
                 
-                # 记录数据段的位置和大小，但不立即读取
+                # Skip the int16 payload for now
                 data_pos = fIn.tell()
                 data_size = sampNum[iseg] * segChN * 2
                 segment_sizes.append(data_size)
                 
-                # 跳过数据段
+                # Advance past this segment's samples
                 fIn.seek(data_pos + data_size)
 
-        # 使用内存映射读取大数据段
+        # Second pass: load samples, memmap when large
         with open(self.__filename__, 'rb') as fIn:
             for iseg in range(self.__segN__):
                 segChN = segInfo[iseg][1]
                 
-                # 使用内存映射读取数据
+                # Seek to the sample payload
                 fIn.seek(segment_positions[iseg] + 256 + segChN * (2 * 3 + 4))
                 
-                # 对于大数据段，使用内存映射
-                if sampNum[iseg] * segChN > 1000000:  # 阈值可以根据实际情况调整
-                    # 使用numpy的memmap直接从文件读取数据
+                # Memmap large segments
+                if sampNum[iseg] * segChN > 1000000:  # memmap threshold
+                    # numpy.memmap of int16 samples
                     mm = np.memmap(self.__filename__, dtype=np.int16, mode='r',
                                   offset=fIn.tell(),
                                   shape=(sampNum[iseg], segChN))
-                    # 复制到内存中以避免后续操作影响原文件
+                    # Copy into RAM so the file can be closed
                     dataRaw[iseg] = np.array(mm, dtype=np.int16)
-                    # 关闭内存映射
+                    # Drop the memmap handle
                     del mm
                 else:
-                    # 对于小数据段，直接读取
+                    # Small segments: read into an array
                     dataRaw[iseg] = np.frombuffer(
                         fIn.read(sampNum[iseg] * segChN * 2),
                         dtype=np.int16
@@ -175,14 +175,14 @@ class IOMixin:
         column = ['Type', 'Start', 'Stop', 'Duration', 'N sample', 'Note']
         segInfo = pd.DataFrame(segInfoDict, index=index, columns=column)
 
-        # 使用并行处理转换统计数据和原始数据
+        # Convert header stats and payloads (threaded)
         from concurrent.futures import ThreadPoolExecutor
         import multiprocessing
         
-        # 确定使用的CPU核心数
+        # Worker count
         num_cores = min(multiprocessing.cpu_count(), self.__segN__)
         
-        # 转换统计数据的函数
+        # Per-segment statistics table
         def process_statistics(iseg):
             segStatis_temp = np.reshape(
                 np.array(segStatis[iseg], dtype='float64'),
@@ -198,25 +198,25 @@ class IOMixin:
             stats_df['Unit'] = chUnit
             return stats_df
         
-        # 转换原始数据的函数
+        # Per-segment sample DataFrame
         def process_raw_data(iseg):
-            # 使用numpy的向量化操作加速
+            # Cast to float64
             data_temp = dataRaw[iseg].astype('float64')
             
-            # 使用广播机制一次性应用所有系数
+            # Apply channel coefficients by broadcasting
             coef_array = np.array(chCoef, dtype='float64')
             data_temp = data_temp * coef_array
             
-            # 创建DataFrame
+            # Column names are channel names
             return pd.DataFrame(data_temp, columns=chName, dtype='float64')
         
-        # 并行处理统计数据
+        # Statistics tables
         self.segStatis = [None] * self.__segN__
         with ThreadPoolExecutor(max_workers=num_cores) as executor:
             for iseg, result in enumerate(executor.map(process_statistics, range(self.__segN__))):
                 self.segStatis[iseg] = result
         
-        # 并行处理原始数据
+        # Sample tables
         self.data = [None] * self.__segN__
         with ThreadPoolExecutor(max_workers=num_cores) as executor:
             for iseg, result in enumerate(executor.map(process_raw_data, range(self.__segN__))):
@@ -272,25 +272,22 @@ class IOMixin:
         """
         return export_to_dat(self, Time, sseg)
 
-    def to_mat(self, sseg=0):
-        """
-        Export data to MATLAB MAT file format.
-        
-        Parameters:
-        -----------
+    def to_mat(self, filename=None, sseg=0):
+        """Export data to MATLAB MAT file format.
+
+        Parameters
+        ----------
+        filename : str, optional
+            Output path. When *None*, a name is derived from the original file.
         sseg : int, optional
-            Segment index to export, default is 0
-            
-        Returns:
-        --------
+            Segment index to export, default is 0.
+
+        Returns
+        -------
         bool
-            True if export was successful, False otherwise
-            
-        Notes:
-        ------
-        The output file will be named based on the original filename.
+            True if export was successful, False otherwise.
         """
-        return export_to_mat(self, sseg)
+        return export_to_mat(self, filename=filename, sseg=sseg)
 
     def to_feather(self, sseg='all', compression='zstd'):
         """
@@ -410,7 +407,8 @@ class IOMixin:
         alignAccName : str, optional
             Acceleration channel name for alignment, default is None
         alignMethod : str, optional
-            Alignment method ('time' or 'cross_correlation'), default is 'time'
+            Alignment method (``'acc'``, ``'time'``, or ``'none'``),
+            default is ``'acc'``.
         zerofilename : str, optional
             Path to zero reference file, default is ''
         lowpassfilter : float, optional
@@ -563,7 +561,12 @@ class IOMixin:
             elif alignMethod == 'time':
                 try:
                     # Calculate time difference and convert to sample points
-                    timedelta = Time_start - pd.Timestamp('2023-'+self.__date__+' '+self.segInfo['Start']['Seg 0'])
+                    das_start = self.segInfo['Start'].iloc[0]
+                    das_date = self.__date__ or Time_start.strftime('%m-%d')
+                    das_ts = pd.Timestamp(
+                        f"{Time_start.year}-{das_date} {das_start}"
+                    )
+                    timedelta = Time_start - das_ts
                     lag = round(timedelta.total_seconds() * self.__fs__)
                     
                     # Move all motion channels by the calculated lag

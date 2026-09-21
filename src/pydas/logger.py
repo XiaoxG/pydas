@@ -1,7 +1,5 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
-"""
-PyDAS Logger Module
+"""PyDAS Logger Module
+
 Provides logging functionality for the PyDAS system.
 """
 
@@ -18,25 +16,25 @@ LOG_LEVELS = {
 logger = logging.getLogger('pydas')
 
 
-def get_logger(name):
-    """Get a logger with the specified name.
+def get_logger(name=None):
+    """Return a logger under the ``pydas`` hierarchy.
 
     Parameters
     ----------
-    name : str
-        Name of the logger.
+    name : str, optional
+        Logger name. Bare names become children of ``pydas``. Names that
+        already start with ``pydas`` are used as-is. ``None`` returns the
+        package logger.
 
     Returns
     -------
     logging.Logger
-        Logger instance with the specified name.
-
-    Notes
-    -----
-    - Returns a child logger of the PyDAS logger.
-    - Inherits level and handlers from the parent logger.
     """
-    return logging.getLogger(name)
+    if not name:
+        return logging.getLogger('pydas')
+    if name == 'pydas' or name.startswith('pydas.'):
+        return logging.getLogger(name)
+    return logging.getLogger('pydas').getChild(name)
 
 
 def setup_logger(level='info'):

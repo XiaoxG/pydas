@@ -17,7 +17,9 @@ from typing import Union, List, Optional, Tuple, Any
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-from .logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 from .waveModel import TimeSeries
 from .plot import _plot_statistics_mpl, _plot_statistics_plotly, _detect_peaks, plot_extreme_analysis
 
@@ -565,38 +567,38 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
         # Ensure data is a numpy array
         data_array = np.array(data)
         
-        # 计算数据持续时间
-        dt = 1.0  # 默认采样间隔为1秒
+        # Data duration
+        dt = 1.0  # default sample interval [s]
         
-        # 尝试从pydas对象获取dt
+        # Prefer dt from the PyDAS object
         if hasattr(pydas_obj, 'dt') and pydas_obj.dt is not None:
             dt = pydas_obj.dt
-        # 如果有时间数组，尝试从中估计dt
+        # Else estimate dt from a time vector
         elif hasattr(pydas_obj, 'time') and len(pydas_obj.time) > 1:
             dt = (pydas_obj.time[-1] - pydas_obj.time[0]) / (len(pydas_obj.time) - 1)
         
-        # 计算数据持续时间（秒）
+        # Duration in seconds
         data_duration_seconds = len(data_array) * dt
         
-        # 转换为小时
+        # Convert to hours
         data_duration_hours = data_duration_seconds / 3600
         
-        # 直接使用scipy.signal.find_peaks进行峰值检测以获得精确的索引
-        # 检测正峰值
+        # Peak indices via scipy.signal.find_peaks
+        # Positive peaks
         pos_peaks_idx, _ = find_peaks(data_array, height=peak_height, threshold=threshold, 
                                  distance=peak_distance, prominence=peak_prominence, 
                                  width=width, wlen=wlen, rel_height=rel_height)
         
-        # 检测负峰值 
+        # Negative peaks
         neg_peaks_idx, _ = find_peaks(-data_array, height=peak_height, threshold=threshold, 
                                  distance=peak_distance, prominence=peak_prominence, 
                                  width=width, wlen=wlen, rel_height=rel_height)
         
-        # 根据索引获取峰值
+        # Peak values from indices
         peaks_positive = data_array[pos_peaks_idx] if len(pos_peaks_idx) > 0 else np.array([])
         peaks_negative = -data_array[neg_peaks_idx] if len(neg_peaks_idx) > 0 else np.array([])
         
-        # 合并所有峰值的绝对值
+        # Absolute values of all peaks
         all_peaks = np.concatenate([np.abs(peaks_positive), np.abs(peaks_negative)])
         
         if len(all_peaks) == 0:
@@ -610,7 +612,7 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                 'message': "No peaks detected. Try adjusting peak detection parameters."
             }
 
-        # 计算峰值的基本统计信息
+        # Peak summary statistics
         peak_stats = {
             'mean': np.mean(all_peaks),
             'median': np.median(all_peaks),
@@ -620,7 +622,7 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
             'count': len(all_peaks)
         }
         
-        # 计算超越概率和经验分布
+        # Empirical exceedance
         sorted_peaks = np.sort(all_peaks)[::-1]  # Sort in descending order
         n = len(sorted_peaks)
         ranks = np.arange(1, n+1)
@@ -628,58 +630,58 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
         # Calculate exceedance probabilities using Weibull formula
         exceedance_prob = ranks / (n + 1)
         
-        # 设置回归周期基于数据持续时间
-        # 在这里，我们使用小时作为时间单位
-        # 计算回归周期（小时）
+        # Return periods from the record length
+        # Hours as the time unit
+        # Return periods [h]
         return_periods = [data_duration_hours * multiplier for multiplier in return_period_multipliers]
         
-        # 创建适当的标签
+        # Human-readable period labels
         return_period_labels = []
         for period in return_periods:
-            if period < 24:  # 小于一天
+            if period < 24:  # < 1 day
                 return_period_labels.append(f"{period:.1f} hours")
-            elif period < 24*30:  # 小于一个月（近似）
+            elif period < 24*30:  # < ~1 month
                 return_period_labels.append(f"{period/24:.1f} days")
-            elif period < 24*365:  # 小于一年
+            elif period < 24*365:  # < 1 year
                 return_period_labels.append(f"{period/(24*30):.1f} months")
-            else:  # 一年或以上
+            else:  # >= 1 year
                 return_period_labels.append(f"{period/(24*365.25):.1f} years")
 
-        # 拟合极值分布（GEV 和 Gumbel）
-        # 首先尝试GEV分布
+        # Fit GEV and Gumbel
+        # GEV first
         try:
             # Fit GEV distribution to peaks
             gev_params = stats.genextreme.fit(all_peaks)
             
-            # 为GEV计算AIC（Akaike信息准则）
+            # GEV AIC
             gev_nll = -np.sum(stats.genextreme.logpdf(all_peaks, *gev_params))
-            gev_k = len(gev_params)  # 参数数量
+            gev_k = len(gev_params)  # parameter count
             gev_aic = 2 * gev_k + 2 * gev_nll
             
-            # 检查形状参数（shape parameter）
+            # Shape parameter
             shape = gev_params[0]
             
-            # 计算给定回归周期的回归值
-            # 对于GEV分布，回归值R(T) = μ - σ/ξ * [1 - (-ln(1-1/T))^(-ξ)] 当 ξ≠0
-            # 当 ξ=0 时，R(T) = μ - σ * ln(-ln(1-1/T))
+            # Return levels at the requested periods
+            # GEV return level: ξ≠0
+            # GEV return level: ξ=0 (Gumbel limit)
             gev_return_values = {}
             gev_confidence_intervals = {}
             
-            # 使用bootstrap方法计算置信区间
+            # Bootstrap confidence intervals
             n_bootstrap = 1000
             bootstrap_return_values = {label: [] for label in return_period_labels}
             
-            # 创建bootstrap样本
-            rng = np.random.RandomState(42)  # 固定随机种子以获得可重复结果
+            # Bootstrap samples
+            rng = np.random.RandomState(42)  # reproducible bootstrap
             for _ in range(n_bootstrap):
-                # 从峰值中有放回抽样
+                # Sample peaks with replacement
                 bootstrap_sample = rng.choice(all_peaks, size=len(all_peaks), replace=True)
                 try:
-                    # 拟合GEV分布
+                    # Fit GEV
                     bootstrap_params = stats.genextreme.fit(bootstrap_sample)
                     bootstrap_shape = bootstrap_params[0]
                     
-                    # 计算各回归周期的回归值
+                    # Return levels for this sample
                     for i, T in enumerate(return_periods):
                         if abs(bootstrap_shape) < 1e-6:  # Shape parameter close to zero
                             return_val = bootstrap_params[1] - bootstrap_params[2] * np.log(-np.log(1 - 1/T))
@@ -687,10 +689,10 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                             return_val = bootstrap_params[1] - (bootstrap_params[2] / bootstrap_shape) * (1 - (-np.log(1 - 1/T)) ** (-bootstrap_shape))
                         bootstrap_return_values[return_period_labels[i]].append(return_val)
                 except:
-                    # 如果拟合失败，忽略这个bootstrap样本
+                    # Skip failed fits
                     continue
             
-            # 计算各回归周期的回归值和置信区间
+            # Return levels and confidence intervals for this sample
             for i, T in enumerate(return_periods):
                 label = return_period_labels[i]
                 if abs(shape) < 1e-6:  # Shape parameter close to zero
@@ -699,17 +701,17 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                     return_val = gev_params[1] - (gev_params[2] / shape) * (1 - (-np.log(1 - 1/T)) ** (-shape))
                 gev_return_values[label] = return_val
                 
-                # 计算95%置信区间（如果bootstrap样本足够）
+                # 95% CI when enough samples
                 bootstrap_values = bootstrap_return_values[label]
-                if len(bootstrap_values) > 50:  # 确保有足够的bootstrap样本
+                if len(bootstrap_values) > 50:  # enough bootstrap samples
                     lower_ci = np.percentile(bootstrap_values, 2.5)
                     upper_ci = np.percentile(bootstrap_values, 97.5)
                     gev_confidence_intervals[label] = (lower_ci, upper_ci)
                 else:
                     gev_confidence_intervals[label] = (None, None)
             
-            # GEV分布参数 - 不直接存储分布对象以避免序列化问题
-            # 而是保存参数，在需要时重新创建分布对象
+            # Store GEV params, not the frozen dist (pickling)
+            # Recreate the dist from params when needed
             gev_model = {
                 'distribution': 'GEV',
                 'shape': gev_params[0],
@@ -724,59 +726,59 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
             gev_confidence_intervals = {}
             gev_aic = float('inf')
         
-        # 拟合Gumbel分布（Generalized Extreme Value分布的特例，形状参数为0）
+        # Gumbel (GEV with ξ=0)
         try:
             # Fit Gumbel distribution to peaks
             gumbel_params = stats.gumbel_r.fit(all_peaks)
             
-            # 为Gumbel计算AIC
+            # Gumbel AIC
             gumbel_nll = -np.sum(stats.gumbel_r.logpdf(all_peaks, *gumbel_params))
-            gumbel_k = len(gumbel_params)  # 参数数量
+            gumbel_k = len(gumbel_params)  # parameter count
             gumbel_aic = 2 * gumbel_k + 2 * gumbel_nll
             
-            # 计算给定回归周期的回归值
-            # 对于Gumbel分布，回归值R(T) = μ - σ * ln(-ln(1-1/T))
+            # Return levels at the requested periods
+            # Gumbel return level
             gumbel_return_values = {}
             gumbel_confidence_intervals = {}
             
-            # 使用bootstrap方法计算置信区间
+            # Bootstrap confidence intervals
             n_bootstrap = 1000
             bootstrap_return_values = {label: [] for label in return_period_labels}
             
-            # 创建bootstrap样本
-            rng = np.random.RandomState(42)  # 固定随机种子以获得可重复结果
+            # Bootstrap samples
+            rng = np.random.RandomState(42)  # reproducible bootstrap
             for _ in range(n_bootstrap):
-                # 从峰值中有放回抽样
+                # Sample peaks with replacement
                 bootstrap_sample = rng.choice(all_peaks, size=len(all_peaks), replace=True)
                 try:
-                    # 拟合Gumbel分布
+                    # Fit Gumbel
                     bootstrap_params = stats.gumbel_r.fit(bootstrap_sample)
                     
-                    # 计算各回归周期的回归值
+                    # Return levels for this sample
                     for i, T in enumerate(return_periods):
                         return_val = bootstrap_params[0] + bootstrap_params[1] * (-np.log(-np.log(1 - 1/T)))
                         bootstrap_return_values[return_period_labels[i]].append(return_val)
                 except:
-                    # 如果拟合失败，忽略这个bootstrap样本
+                    # Skip failed fits
                     continue
             
-            # 计算各回归周期的回归值和置信区间
+            # Return levels and confidence intervals for this sample
             for i, T in enumerate(return_periods):
                 label = return_period_labels[i]
                 return_val = gumbel_params[0] + gumbel_params[1] * (-np.log(-np.log(1 - 1/T)))
                 gumbel_return_values[label] = return_val
                 
-                # 计算95%置信区间（如果bootstrap样本足够）
+                # 95% CI when enough samples
                 bootstrap_values = bootstrap_return_values[label]
-                if len(bootstrap_values) > 50:  # 确保有足够的bootstrap样本
+                if len(bootstrap_values) > 50:  # enough bootstrap samples
                     lower_ci = np.percentile(bootstrap_values, 2.5)
                     upper_ci = np.percentile(bootstrap_values, 97.5)
                     gumbel_confidence_intervals[label] = (lower_ci, upper_ci)
                 else:
                     gumbel_confidence_intervals[label] = (None, None)
             
-            # Gumbel分布参数 - 不直接存储分布对象以避免序列化问题
-            # 而是保存参数，在需要时重新创建分布对象
+            # Store Gumbel params, not the frozen dist
+            # Recreate the dist from params when needed
             gumbel_model = {
                 'distribution': 'Gumbel',
                 'loc': gumbel_params[0],
@@ -790,7 +792,7 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
             gumbel_confidence_intervals = {}
             gumbel_aic = float('inf')
         
-        # 选择最佳模型（基于AIC值）
+        # Pick the model with lower AIC
         if gev_aic < gumbel_aic and gev_model is not None:
             best_model = gev_model
             return_values = gev_return_values
@@ -807,14 +809,14 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
             return_value_confidence_intervals = {}
             logger.warning("No valid distribution model could be fitted")
         
-        # 创建超越概率表
+        # Exceedance table
         exceedance_table = pd.DataFrame({
             'Peak Value': sorted_peaks,
             'Exceedance Probability': exceedance_prob,
             'Return Period (hours)': 1 / exceedance_prob * data_duration_hours / n
         })
         
-        # 准备结果字典
+        # Result dict
         results = {
             'peaks_positive': peaks_positive,
             'peaks_negative': peaks_negative,
@@ -832,14 +834,14 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
         
         # Create visualization if requested
         if visualization:
-            # 调用plot.py中的可视化函数
+            # Delegate plotting to pydas.plot
             figure = plot_extreme_analysis(
                 results=results, 
                 visualization_backend=visualization_backend,
                 save_path=save_path,
                 save_html=save_html,
                 visualization=visualization,
-                title=None,  # 让函数自动生成标题
+                title=None,  # auto title
                 ch_name=ch_name,
                 pydas_obj=pydas_obj,
                 bins=bins,
@@ -848,7 +850,7 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                 return_period_labels=return_period_labels
             )
             
-            # 将图形对象添加到结果中
+            # Attach figure to the result
             results['figure'] = figure
         
         return results

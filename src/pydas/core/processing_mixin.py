@@ -58,16 +58,19 @@ class ProcessingMixin:
         """
         Convert model scale data to prototype scale.
         
-        Parameters:
-        -----------
-        lam : float
-            Scale factor
+        Parameters
+        ----------
         rho : float, optional
-            Water density in kg/m³, default is 1.025
+            Water density in kg/m³, default is 1.025.
         g : float, optional
-            Gravitational acceleration in m/s², default is 9.807
+            Gravitational acceleration in m/s², default is 9.807.
         pInfo : bool, optional
-            Whether to print information, default is False
+            Whether to print information, default is False.
+
+        Notes
+        -----
+        Uses ``self.__lam__`` as the length scale factor. There is no ``lam``
+        argument; set ``obj.__lam__`` before calling this method.
             
         Notes:
         ------
@@ -539,7 +542,7 @@ class ProcessingMixin:
                         # Assemble the result DataFrame
                         stats = pd.DataFrame({
                             'Mean': mean_result,
-                            'Std': std_result,
+                            'STD': std_result,
                             'Max': max_result,
                             'Min': min_result
                         })
@@ -582,8 +585,8 @@ class ProcessingMixin:
                             chunk = data_frame.iloc[start_idx:end_idx]
                             
                             # Update running min/max
-                            maxs = pd.concat([maxs, chunk.max()]).max(level=0)
-                            mins = pd.concat([mins, chunk.min()]).min(level=0)
+                            maxs = np.maximum(maxs, chunk.max())
+                            mins = np.minimum(mins, chunk.min())
                             
                             # Update mean and variance via Welford algorithm
                             for _, row in chunk.iterrows():
@@ -600,7 +603,7 @@ class ProcessingMixin:
                         # Assemble result DataFrame
                         stats = pd.DataFrame({
                             'Mean': means,
-                            'Std': stds,
+                            'STD': stds,
                             'Max': maxs,
                             'Min': mins,
                             'Unit': self.chInfo.set_index('Name')['Unit']
@@ -614,7 +617,7 @@ class ProcessingMixin:
                     
                     # Transpose to match the expected (channels × stats) layout
                     stats = stats.T
-                    stats.columns = ['Mean', 'Std', 'Max', 'Min']
+                    stats.columns = ['Mean', 'STD', 'Max', 'Min']
                     
                     # Attach unit column
                     stats['Unit'] = self.chInfo.set_index('Name')['Unit']
@@ -634,7 +637,7 @@ class ProcessingMixin:
                 # Assemble fallback result DataFrame
                 stats_data = {
                     'Mean': means,
-                    'Std': stds,
+                    'STD': stds,
                     'Max': maxs,
                     'Min': mins,
                     'Unit': self.chInfo.set_index('Name')['Unit']
@@ -705,55 +708,54 @@ class ProcessingMixin:
 
         return None
 
-    def cut_series(self,
-                   start,
-                   stop,
-                 sseg=0):
-        """
-        Cut a time series to a specified range.
-        
-        Parameters:
-        -----------
-        start : str or float
-            Start time of the cut (time string or seconds)
-        stop : str or float
-            End time of the cut (time string or seconds)
+    def cut_series(self, start, stop, sseg=0):
+        """Cut a time series to a specified time range in seconds.
+
+        Parameters
+        ----------
+        start : float
+            Start time in seconds (inclusive).
+        stop : float
+            End time in seconds (exclusive of the sample at ``stop``).
         sseg : int, optional
-            Segment index, default is 0
-            
-        Raises:
-        -------
+            Segment index, default is 0.
+
+        Raises
+        ------
         ValueError
-            If start or stop times are invalid
+            If the segment is missing or the range is empty.
         """
-        def moveTimestr(Timestr, seconds_float):
+        def move_timestr(timestr, seconds_float):
             seconds = int(seconds_float)
-            milliseconds = int((seconds_float-seconds)*1000)
-            startTime = datetime.datetime.strptime(Timestr,"%H:%M:%S.%f")
-            startTime_new = (startTime + datetime.timedelta(seconds=seconds, milliseconds=milliseconds)).strftime("%H:%M:%S.%f")
-            return startTime_new[:-5]
+            milliseconds = int((seconds_float - seconds) * 1000)
+            start_time = datetime.datetime.strptime(timestr, "%H:%M:%S.%f")
+            start_time_new = (
+                start_time + datetime.timedelta(seconds=seconds, milliseconds=milliseconds)
+            ).strftime("%H:%M:%S.%f")
+            return start_time_new[:-5]
 
-        startIndx = int(start * self.__fs__)
-        stopIndx = int(stop * self.__fs__)
-        lngth = self.data[sseg].index[-1]
-        self.data[sseg] = self.data[sseg].drop(range(startIndx + 1))
-        self.data[sseg] = self.data[sseg].drop(range(stopIndx, lngth + 1))
-        self.data[sseg] = self.data[sseg].reset_index(drop=True)
+        if sseg < 0 or sseg >= self.__segN__:
+            raise ValueError(f"Invalid segment index: {sseg}")
 
-        sampNum = self.data[sseg].shape[0]
+        start_idx = int(start * self.__fs__)
+        stop_idx = int(stop * self.__fs__)
+        n_rows = len(self.data[sseg])
+        start_idx = max(0, min(start_idx, n_rows))
+        stop_idx = max(start_idx, min(stop_idx, n_rows))
+        if stop_idx <= start_idx:
+            raise ValueError("cut_series range is empty after applying start/stop.")
 
-        self.segInfo.loc['Seg{0:2d}'.format(
-            sseg),'Start'] = moveTimestr(self.segInfo['Start'].values[0], start)
-        self.segInfo.loc['Seg{0:2d}'.format(
-            sseg),'Stop'] = moveTimestr(self.segInfo['Start'].values[0], stop)
-        self.segInfo.loc['Seg{0:2d}'.format(
-            sseg),'Duration'] = '{0:8.1f}s'.format((sampNum - 1) / self.__fs__)
-        self.segInfo.loc['Seg{0:2d}'.format(
-            sseg),'N sample'] = sampNum
+        self.data[sseg] = self.data[sseg].iloc[start_idx:stop_idx].reset_index(drop=True)
+        samp_num = self.data[sseg].shape[0]
+        seg_label = self.segInfo.index[sseg]
+        orig_start = self.segInfo['Start'].iloc[sseg]
+
+        self.segInfo.loc[seg_label, 'Start'] = move_timestr(orig_start, start)
+        self.segInfo.loc[seg_label, 'Stop'] = move_timestr(orig_start, stop)
+        self.segInfo.loc[seg_label, 'Duration'] = '{0:8.1f}s'.format((samp_num - 1) / self.__fs__)
+        self.segInfo.loc[seg_label, 'N sample'] = samp_num
         self.updateST(sseg=sseg)
-        logger.info('Cut time series from {0:5.2f}s to {1:5.2f}s'.format(
-                start, stop))
-
+        logger.info('Cut time series from {0:5.2f}s to {1:5.2f}s'.format(start, stop))
         return None
 
     def channel2fullscale(self, channel_name, lam, rho=1.025, g=9.807):
@@ -801,7 +803,7 @@ class ProcessingMixin:
         trans_temp = findtrans(unit, transDict)
         logger.debug(f"Conversion result for unit {unit}: {trans_temp}")
         
-        # 确保系数是浮点数
+        # Conversion coefficients as float
         try:
             C1 = float(trans_temp[1][0])  # CoeffUnit
             C2 = float(rho ** trans_temp[1][1])  # CoeffRho
@@ -810,35 +812,35 @@ class ProcessingMixin:
             logger.debug(f"Conversion coefficients: C1={C1}, C2={C2}, C3={C3}, total={coeff}")
         except Exception as e:
             logger.error(f"Error converting coefficients: {str(e)}")
-            # 使用默认值
+            # Fall back to identity scaling
             coeff = 1.0
             logger.warning(f"Using default coefficient value: {coeff}")
         
         # Calculate time array based on the scaling
         fs_scaled = self.__fs__ / np.sqrt(lam)
         
-        # 只处理第一段数据（如果用户需要多段，可以拓展此功能）
+        # Only the first segment is converted
         idx1 = 0
         if self.__segN__ > 1:
             logger.info(f"Multiple segments found. Only converting first segment.")
             
         # Extract original data and ensure it's a float64 numpy array
         try:
-            # 确保获取的是numpy数组而不是pandas Series
+            # ndarray, not Series
             data_raw = self.data[idx1][channel_name]
             if hasattr(data_raw, 'values'):
                 data = data_raw.values
             else:
                 data = np.array(data_raw)
                 
-            # 检查数据类型并转换为float64
+            # float64 for scaling
             if not np.issubdtype(data.dtype, np.floating):
                 logger.debug(f"Converting data from {data.dtype} to float64")
                 data = data.astype(np.float64)
             else:
                 data = data.copy()
                 
-            # 检查数据是否有nan或inf
+            # Flag non-finite samples
             if np.any(np.isnan(data)) or np.any(np.isinf(data)):
                 logger.warning(f"Data contains NaN or Inf values")
                 
@@ -855,12 +857,12 @@ class ProcessingMixin:
         # Create time array
         T = np.arange(0, len(data)) / fs_scaled
         
-        # 创建TimeSeries对象
+        # Build a waveModel.TimeSeries
         try:
-            # 确保单位名称是字符串
+            # Unit label as str
             unit_name = str(trans_temp[0]) if trans_temp and trans_temp[0] is not None else unit
             
-            # TimeSeries构造函数需要data和args参数，其中args是时间向量
+            # args is the time vector
             ts = TimeSeries(data_scaled, T)
             return ts
         except Exception as e:
@@ -868,38 +870,32 @@ class ProcessingMixin:
             return None
 
     def channel_calculate(self, ch1, ch2, operation, new_chName, sseg=0):
-        """
-        对两个通道执行数学运算并创建新的通道
-        
-        Parameters:
-        -----------
-        ch1 : str
-            第一个通道名称
-        ch2 : str
-            第二个通道名称
+        """Create a new channel from an arithmetic operation on two channels.
+
+        Parameters
+        ----------
+        ch1, ch2 : str
+            Operand channel names.
         operation : str
-            要执行的运算，可选值: 
-            - 'add'或'+': 加法
-            - 'subtract'或'-': 减法
-            - 'multiply'或'*': 乘法
-            - 'divide'或'/': 除法
+            ``'add'``/``'+'``, ``'subtract'``/``'-'``, ``'multiply'``/``'*'``,
+            or ``'divide'``/``'/'``.
         new_chName : str
-            新通道的名称
+            Name of the result channel.
         sseg : int, list, or 'all', optional
-            要处理的数据段，默认为0
-            
-        Returns:
-        --------
+            Segment(s) to process, default is 0.
+
+        Returns
+        -------
         bool
-            如果操作成功返回True，否则返回False
-            
-        Notes:
-        ------
-        - 加减运算要求两个通道的单位相同
-        - 乘除运算不要求通道单位相同，会自动计算新的单位
-        - 如果新通道名称已存在，操作将被取消
+            True on success, False otherwise.
+
+        Notes
+        -----
+        Addition and subtraction require matching units. Multiplication and
+        division compose a new unit string. An existing ``new_chName`` cancels
+        the operation.
         """
-        # 检查通道是否存在
+        # Validate channel name
         if ch1 not in self.chInfo['Name'].values:
             logger.warning(f"Channel '{ch1}' does not exist.")
             return False
@@ -908,7 +904,7 @@ class ProcessingMixin:
             logger.warning(f"Channel '{ch2}' does not exist.")
             return False
             
-        # 检查操作类型并转换符号
+        # Normalise operator aliases
         ops_map = {
             '+': 'add',
             '-': 'subtract',
@@ -919,32 +915,32 @@ class ProcessingMixin:
         if operation in ops_map:
             operation = ops_map[operation]
         elif operation not in ['add', 'subtract', 'multiply', 'divide']:
-            valid_operations = ["'add'或'+'", "'subtract'或'-'", "'multiply'或'*'", "'divide'或'/'"]
+            valid_operations = ["'add' or '+'", "'subtract' or '-'", "'multiply' or '*'", "'divide' or '/'"]
             logger.warning(f"Invalid operation '{operation}'. Valid operations are: {valid_operations}")
             return False
             
-        # 检查新通道名是否已存在
+        # Reject colliding names
         if new_chName in self.chInfo['Name'].values:
             logger.warning(f"Channel '{new_chName}' already exists. Operation canceled.")
             return False
             
-        # 获取通道信息
+        # Operand metadata
         ch1_idx = self.chInfo.index[self.chInfo['Name'] == ch1].tolist()[0]
         ch2_idx = self.chInfo.index[self.chInfo['Name'] == ch2].tolist()[0]
         
         ch1_unit = self.chInfo.loc[ch1_idx, 'Unit']
         ch2_unit = self.chInfo.loc[ch2_idx, 'Unit']
         
-        # 检查单位一致性（仅加减运算）
+        # Add/subtract require identical units
         if operation in ['add', 'subtract'] and ch1_unit != ch2_unit:
             logger.warning(f"Cannot {operation} channels with different units: '{ch1_unit}' and '{ch2_unit}'")
             return False
             
-        # 确定新通道的单位
+        # Result unit
         if operation in ['add', 'subtract']:
             new_unit = ch1_unit
         elif operation == 'multiply':
-            # 单位相乘
+            # Multiply units
             if ch1_unit == '-' or ch2_unit == '-':
                 new_unit = ch1_unit if ch2_unit == '-' else ch2_unit
             elif ch1_unit == '' or ch2_unit == '':
@@ -952,7 +948,7 @@ class ProcessingMixin:
             else:
                 new_unit = f"{ch1_unit}·{ch2_unit}"
         elif operation == 'divide':
-            # 单位相除
+            # Divide units
             if ch1_unit == '-' or ch1_unit == '':
                 new_unit = '-'
             elif ch2_unit == '-' or ch2_unit == '':
@@ -960,7 +956,7 @@ class ProcessingMixin:
             else:
                 new_unit = f"{ch1_unit}/{ch2_unit}"
                 
-        # 确定要处理的数据段
+        # Segment list
         if sseg == 'all':
             segments = list(range(self.__segN__))
         elif isinstance(sseg, int):
@@ -977,14 +973,14 @@ class ProcessingMixin:
             logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
             return False
             
-        # 初始化成功标志
+        # Success flag
         success = True
             
-        # 处理第一个段并创建新通道
+        # First segment creates the channel
         first_seg = segments[0]
         
         try:
-            # 执行运算
+            # Apply the operator
             if operation == 'add':
                 result = self.data[first_seg][ch1] + self.data[first_seg][ch2]
             elif operation == 'subtract':
@@ -992,22 +988,22 @@ class ProcessingMixin:
             elif operation == 'multiply':
                 result = self.data[first_seg][ch1] * self.data[first_seg][ch2]
             elif operation == 'divide':
-                # 处理除零问题
+                # Guard divide-by-zero
                 divisor = self.data[first_seg][ch2].copy()
-                # 将零值替换为NaN以避免除零错误
+                # Replace 0 with NaN before division
                 divisor = divisor.replace(0, np.nan)
                 result = self.data[first_seg][ch1] / divisor
-                # 将NaN值替换为0
+                # Fill NaN (from /0) with 0
                 result = result.fillna(0)
                 
-            # 添加新通道
-            # 系数设为1.0，因为已经进行了计算
+            # Register the result channel
+            # Coefficient is 1 after the computed result
             self.add_channel(new_chName, new_unit, result.values, self.__fs__, 1.0, 0, first_seg)
                 
-            # 处理其他段（如果有）
+            # Additional segments
             for seg in segments[1:]:
                 if ch1 in self.data[seg].columns and ch2 in self.data[seg].columns:
-                    # 执行运算
+                    # Apply the operator
                     if operation == 'add':
                         result = self.data[seg][ch1] + self.data[seg][ch2]
                     elif operation == 'subtract':
@@ -1015,18 +1011,18 @@ class ProcessingMixin:
                     elif operation == 'multiply':
                         result = self.data[seg][ch1] * self.data[seg][ch2]
                     elif operation == 'divide':
-                        # 处理除零问题
+                        # Guard divide-by-zero
                         divisor = self.data[seg][ch2].copy()
-                        # 将零值替换为NaN以避免除零错误
+                        # Replace 0 with NaN before division
                         divisor = divisor.replace(0, np.nan)
                         result = self.data[seg][ch1] / divisor
-                        # 将NaN值替换为0
+                        # Fill NaN (from /0) with 0
                         result = result.fillna(0)
                         
-                    # 添加数据到新通道
+                    # Store result samples
                     self.data[seg][new_chName] = result
                     
-                    # 更新统计信息
+                    # Update segment statistics
                     self.segStatis[seg].loc[new_chName] = [
                         np.mean(result), 
                         np.std(result),
@@ -1036,7 +1032,7 @@ class ProcessingMixin:
                     ]
         except Exception as e:
             logger.error(f"Error performing {operation} operation: {str(e)}")
-            # 如果已经创建了通道，尝试删除它
+            # Roll back a partial channel
             if new_chName in self.chInfo['Name'].values:
                 self.delete_channel(new_chName)
             success = False
@@ -1049,61 +1045,53 @@ class ProcessingMixin:
         return success
 
     def channel_apply_function(self, ch, func, new_chName, unit=None, sseg=0):
-        """
-        对单一通道应用自定义函数并创建新的通道
-        
-        Parameters:
-        -----------
+        """Apply a function to one channel and store the result as a new channel.
+
+        Parameters
+        ----------
         ch : str
-            要处理的通道名称
-        func : callable 或 str
-            要应用的函数。可以是:
-            - 可调用对象(函数), 如 np.square, math.log, lambda x: x**2
-            - 字符串表达式，如 "x**2", "np.log10(x)", "np.exp(x)"
+            Source channel name.
+        func : callable or str
+            Vectorized callable (e.g. ``np.square``, ``lambda x: x**2``) or a
+            restricted expression string where ``x`` is the channel array
+            (e.g. ``"np.abs(x)"``).
         new_chName : str
-            新通道的名称
+            Name of the new channel.
         unit : str, optional
-            新通道的单位。默认为原通道单位（注意：某些运算会改变单位实际含义）
+            Unit of the result. Defaults to the source channel unit.
         sseg : int, list, or 'all', optional
-            要处理的数据段，默认为0
-            
-        Returns:
-        --------
+            Segment(s) to process, default is 0.
+
+        Returns
+        -------
         bool
-            如果操作成功返回True，否则返回False
-            
-        Notes:
-        ------
-        - 如果函数是字符串表达式，将使用eval进行计算，x代表通道数据
-        - 注意：运算后的单位可能需要手动调整，例如:
-          - 平方运算: 单位应为原单位的平方
-          - 开方运算: 单位应为原单位的开方
-          - 对数运算: 通常无单位
-        - 默认保留原单位，需根据具体运算自行调整
+            True on success, False otherwise.
+
+        Notes
+        -----
+        Prefer a vectorized callable. String expressions are evaluated once on
+        the full ndarray, not sample-by-sample.
         """
-        import numpy as np
         import math
-        
-        # 检查通道是否存在
+
         if ch not in self.chInfo['Name'].values:
             logger.warning(f"Channel '{ch}' does not exist.")
             return False
-            
-        # 检查新通道名是否已存在
+
         if new_chName in self.chInfo['Name'].values:
             logger.warning(f"Channel '{new_chName}' already exists. Operation canceled.")
             return False
-            
-        # 获取通道信息
+
         ch_idx = self.chInfo.index[self.chInfo['Name'] == ch].tolist()[0]
         ch_unit = self.chInfo.loc[ch_idx, 'Unit']
-        
-        # 如果未提供单位，默认使用原通道单位
+
         if unit is None:
             unit = ch_unit
-            logger.info(f"注意：使用原通道单位'{ch_unit}'作为新通道单位。根据运算类型，可能需要手动调整单位。")
-        
-        # 确定要处理的数据段
+            logger.info(
+                f"Using source unit '{ch_unit}' for '{new_chName}'. "
+                "Adjust the unit if the transform changes dimensionality."
+            )
+
         if sseg == 'all':
             segments = list(range(self.__segN__))
         elif isinstance(sseg, int):
@@ -1119,62 +1107,54 @@ class ProcessingMixin:
         else:
             logger.warning("Invalid segment selection. Use an integer, list, or 'all'.")
             return False
-        
+
         try:
-            # 准备处理函数
             if isinstance(func, str):
-                # 检查字符串表达式安全性
-                unsafe_terms = ['import', 'eval', 'exec', 'compile', 'open', 'file', 
-                              'os.', 'sys.', 'subprocess', 'shutil', '__']
+                unsafe_terms = [
+                    'import', 'eval', 'exec', 'compile', 'open', 'file',
+                    'os.', 'sys.', 'subprocess', 'shutil', '__',
+                ]
                 if any(term in func for term in unsafe_terms):
                     logger.error(f"Unsafe expression detected: {func}")
                     return False
-                    
-                # 创建局部变量环境，用于安全执行
-                local_namespace = {"np": np, "math": math}
-                
-                # 定义安全的表达式处理函数
-                def safe_apply(x_series):
-                    local_vars = local_namespace.copy()
-                    local_vars['x'] = x_series
+
+                def apply_func(arr):
+                    local_vars = {"np": np, "math": math, "x": np.asarray(arr)}
                     return eval(func, {"__builtins__": {}}, local_vars)
-                
-                apply_func = safe_apply
             else:
-                # 直接使用提供的函数
                 apply_func = func
-            
-            # 处理所有段 - 使用pandas的apply
+
             for seg_idx, seg in enumerate(segments):
                 if ch not in self.data[seg].columns:
                     logger.warning(f"Channel '{ch}' not found in segment {seg}, skipping.")
                     continue
-                    
-                # 应用函数
-                result = self.data[seg][ch].apply(apply_func)
-                
-                # 对第一个段，创建新通道
+
+                values = np.asarray(self.data[seg][ch].values, dtype=np.float64)
+                try:
+                    result = np.asarray(apply_func(values), dtype=np.float64)
+                    if result.shape != values.shape:
+                        result = np.asarray([apply_func(v) for v in values], dtype=np.float64)
+                except TypeError:
+                    result = np.asarray([apply_func(v) for v in values], dtype=np.float64)
+
                 if seg_idx == 0:
-                    self.add_channel(new_chName, unit, result.values, self.__fs__, 1.0, 0, seg)
+                    self.add_channel(new_chName, unit, result, self.__fs__, 1.0, 0, seg)
                 else:
-                    # 对其他段，添加数据到通道
                     self.data[seg][new_chName] = result
-                    
-                # 更新统计信息 - 直接使用pandas的统计方法
+
                 self.segStatis[seg].loc[new_chName] = [
-                    result.mean(), 
-                    result.std(),
-                    result.max(), 
-                    result.min(), 
-                    unit
+                    np.mean(result),
+                    np.std(result),
+                    np.amax(result),
+                    np.amin(result),
+                    unit,
                 ]
-            
-            logger.info(f"成功创建新通道 '{new_chName}'，应用函数到 '{ch}'")
+
+            logger.info(f"Created channel '{new_chName}' by applying a function to '{ch}'")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error applying function to channel: {str(e)}")
-            # 如果已经创建了通道，尝试删除它
             if new_chName in self.chInfo['Name'].values:
                 self.delete_channel(new_chName)
             return False

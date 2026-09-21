@@ -1,18 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 Process module for PyDAS.
 Contains functions for data processing and manipulation.
 """
 
+import logging
 import numpy as np
 import pandas as pd
 from scipy.signal import butter, filtfilt
 import copy
 from .utils import diff1d
 
-from .logger import get_logger
-logger = get_logger('pydas.process')
+logger = logging.getLogger(__name__)
 
 def apply_lowpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnValue=False, 
                         sseg=0, order=6, plot=False):
@@ -26,7 +24,9 @@ def apply_lowpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVal
     chName : str or list
         Name of the channel to filter, or list of channel names
     cutoffull : float, optional
-        Cutoff frequency in Hz, default is 2
+        Full-scale cutoff in rad/s, default is 2. In model scale this is
+        converted as ``cutoffull / (2*pi) * sqrt(lam)``. To keep the
+        existing report/test contract this is **not** Hertz.
     replace : bool, optional
         Whether to replace original data, default is True
     returnValue : bool, optional
@@ -61,41 +61,41 @@ def apply_lowpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVal
 
     def _butter_lowpass_filter(data, cutoff, fs, order=5):
         try:
-            # 计算滤波器所需的最小数据长度（一般为2*order + 1）
+            # Minimum length for filtfilt is typically 2*order + 1
             min_data_length = 2 * order + 1
             
-            # 检查数据长度是否足够
+            # Warn when the series is shorter than the filter needs
             if len(data) < min_data_length:
                 logger.warning(f"Data length ({len(data)}) is less than minimum required ({min_data_length}). Filter may not be effective.")
             
-            # 计算Nyquist频率
+            # Nyquist frequency
             nyq = 0.5 * fs
             
-            # 归一化截止频率
+            # Normalised cutoff
             normal_cutoff = cutoff / nyq
             
-            # 设计滤波器
+            # Design filter
             b, a = _butter_lowpass(cutoff, fs, order)
             
-            # 应用滤波器
+            # Apply filter
             y = filtfilt(b, a, data)
             return y
         except Exception as e:
             logger.error(f"Filter error: {str(e)}. Returning original data.")
             return data
 
-    # 检查通道是否存在
+    # Validate channel name
     if isinstance(chName, str) and chName not in pydas_obj.chInfo['Name'].values:
         logger.error(f"Channel '{chName}' not found.")
         return None
     
-    # 模型尺度下调整截止频率
+    # Convert full-scale rad/s cutoff to the object's current scale
     if pydas_obj.__scale__ == 'model':
         cutoff = cutoffull / 2 / np.pi * np.sqrt(pydas_obj.__lam__)
     else:
         cutoff = cutoffull / 2 / np.pi
 
-    # 处理通道列表
+    # Recurse when a list of channels is given
     if isinstance(chName, list):
         results = []
         for ch in chName:
@@ -109,35 +109,35 @@ def apply_lowpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVal
             return results
         return None
                 
-    # 获取数据
+    # Load channel samples
     try:
         data = pydas_obj.data[sseg][chName].values
     except Exception as e:
         logger.error(f"Error accessing data for channel {chName}: {str(e)}")
         return None
         
-    # 检查数据是否存在且长度足够
+    # Reject empty series
     if data is None or len(data) <= 0:
         logger.error(f"No data found for channel {chName} in segment {sseg}")
         return None
     
-    # 保存原始数据，用于后续对比或绘图
+    # Keep a copy for optional comparison plots
     original_data = copy.deepcopy(data)
     
-    # 应用滤波器
+    # Apply filter
     try:
         filtered_data = _butter_lowpass_filter(data, cutoff, pydas_obj.__fs__, order)
         
-        # 如果需要绘图对比
+        # Optional before/after plot
         if plot:
             try:
-                # 为了绘图对比，我们需要创建一个临时通道
+                # Temporary channel used only for the comparison figure
                 temp_channel_name = f"{chName}_filtered"
                 
-                # 创建一个临时PyDAS对象的副本，用于比较
+                # Deep-copy so the live object is not mutated for plotting
                 temp_pydas = copy.deepcopy(pydas_obj)
                 
-                # 添加滤波后的临时通道
+                # Attach the filtered series as a sibling channel
                 unit = temp_pydas.chInfo.loc[temp_pydas.chInfo['Name'] == chName, 'Unit'].values[0]
                 temp_pydas.add_channel(
                     name=temp_channel_name,
@@ -154,12 +154,12 @@ def apply_lowpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVal
                     ch_name=[chName, temp_channel_name],
                     sseg=sseg,
                     title=f"Lowpass Filter Comparison - {chName} (cutoff={cutoffull} Hz, order={order})",
-                    alpha=[0.5, 0.8],  # 原始数据透明度0.5，滤波后数据保持默认0.8
+                    alpha=[0.5, 0.8],  # original=0.5, filtered=0.8
                 )
             except Exception as e:
                 logger.error(f"Error creating comparison plot: {str(e)}")
         
-        # 如果需要替换数据
+        # Write back when replace=True
         if replace:
             pydas_obj.data[sseg][chName] = filtered_data
             logger.info(f'Lowpass for {chName} filter = {cutoffull:3.2f} rad/s in full scale, Lambda = {pydas_obj.__lam__:.2f}')
@@ -168,7 +168,7 @@ def apply_lowpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVal
         logger.error(f"Failed to apply filter to {chName}: {str(e)}")
         return None
             
-    # 返回结果（如果需要）
+    # Return filtered samples when requested
     if returnValue:
         return filtered_data
     
@@ -186,7 +186,9 @@ def apply_highpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVa
     chName : str or list
         Name of the channel to filter, or list of channel names
     cutoffull : float, optional
-        Cutoff frequency in Hz, default is 2
+        Full-scale cutoff in rad/s, default is 2. In model scale this is
+        converted as ``cutoffull / (2*pi) * sqrt(lam)``. To keep the
+        existing report/test contract this is **not** Hertz.
     replace : bool, optional
         Whether to replace original data, default is True
     returnValue : bool, optional
@@ -215,41 +217,41 @@ def apply_highpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVa
 
     def _butter_highpass_filter(data, cutoff, fs, order=5):
         try:
-            # 计算滤波器所需的最小数据长度（一般为2*order + 1）
+            # Minimum length for filtfilt is typically 2*order + 1
             min_data_length = 2 * order + 1
             
-            # 检查数据长度是否足够
+            # Warn when the series is shorter than the filter needs
             if len(data) < min_data_length:
                 logger.warning(f"Data length ({len(data)}) is less than minimum required ({min_data_length}). Filter may not be effective.")
             
-            # 计算Nyquist频率
+            # Nyquist frequency
             nyq = 0.5 * fs
             
-            # 归一化截止频率
+            # Normalised cutoff
             normal_cutoff = cutoff / nyq
             
-            # 设计滤波器
+            # Design filter
             b, a = _butter_highpass(cutoff, fs, order)
             
-            # 应用滤波器，减少边缘效应
+            # Apply zero-phase filter
             y = filtfilt(b, a, data)
             return y
         except Exception as e:
             logger.error(f"Filter error: {str(e)}. Returning original data.")
             return data
 
-    # 检查通道是否存在
+    # Validate channel name
     if isinstance(chName, str) and chName not in pydas_obj.chInfo['Name'].values:
         logger.error(f"Channel '{chName}' not found.")
         return None
     
-    # 模型尺度下调整截止频率
+    # Convert full-scale rad/s cutoff to the object's current scale
     if pydas_obj.__scale__ == 'model':
         cutoff = cutoffull / 2 / np.pi * np.sqrt(pydas_obj.__lam__)
     else:
         cutoff = cutoffull / 2 / np.pi
 
-    # 处理通道列表
+    # Recurse when a list of channels is given
     if isinstance(chName, list):
         results = []
         for ch in chName:
@@ -263,35 +265,35 @@ def apply_highpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVa
             return results
         return None
                 
-    # 获取数据
+    # Load channel samples
     try:
         data = pydas_obj.data[sseg][chName].values
     except Exception as e:
         logger.error(f"Error accessing data for channel {chName}: {str(e)}")
         return None
         
-    # 检查数据是否存在且长度足够
+    # Reject empty series
     if data is None or len(data) <= 0:
         logger.error(f"No data found for channel {chName} in segment {sseg}")
         return None
     
-    # 保存原始数据，用于后续对比或绘图
+    # Keep a copy for optional comparison plots
     original_data = copy.deepcopy(data)
     
-    # 应用滤波器
+    # Apply filter
     try:
         filtered_data = _butter_highpass_filter(data, cutoff, pydas_obj.__fs__, order)
         
-        # 如果需要绘图对比
+        # Optional before/after plot
         if plot:
             try:
-                # 为了绘图对比，我们需要创建一个临时通道
+                # Temporary channel used only for the comparison figure
                 temp_channel_name = f"{chName}_filtered"
                 
-                # 创建一个临时PyDAS对象的副本，用于比较
+                # Deep-copy so the live object is not mutated for plotting
                 temp_pydas = copy.deepcopy(pydas_obj)
                 
-                # 添加滤波后的临时通道
+                # Attach the filtered series as a sibling channel
                 unit = temp_pydas.chInfo.loc[temp_pydas.chInfo['Name'] == chName, 'Unit'].values[0]
                 temp_pydas.add_channel(
                     name=temp_channel_name,
@@ -308,12 +310,12 @@ def apply_highpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVa
                     ch_name=[chName, temp_channel_name],
                     sseg=sseg,
                     title=f"Highpass Filter Comparison - {chName} (cutoff={cutoffull} Hz, order={order})",
-                    alpha=[0.5, 0.8],  # 原始数据透明度0.5，滤波后数据保持默认0.8
+                    alpha=[0.5, 0.8],  # original=0.5, filtered=0.8
                 )
             except Exception as e:
                 logger.error(f"Error creating comparison plot: {str(e)}")
         
-        # 如果需要替换数据
+        # Write back when replace=True
         if replace:
             pydas_obj.data[sseg][chName] = filtered_data
             logger.info(f'Highpass for {chName} filter = {cutoffull:3.2f} rad/s in full scale, Lambda = {pydas_obj.__lam__:.2f}')
@@ -322,7 +324,7 @@ def apply_highpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVa
         logger.error(f"Failed to apply filter to {chName}: {str(e)}")
         return None
             
-    # 返回结果（如果需要）
+    # Return filtered samples when requested
     if returnValue:
         return filtered_data
         
@@ -495,58 +497,58 @@ def data_wash(pydas_obj, ChName, method='linear', order=5, threshold=3, sseg=0):
             logger.error(f"Channel '{ChName}' not found in segment {sseg}")
             raise KeyError(f"Channel '{ChName}' not found")
             
-        # 获取数据Series
+        # Load channel samplesSeries
         data_series = pydas_obj.data[sseg][ChName]
         data_length = len(data_series)
         
-        # 为了更高效地处理大数据集，根据数据大小选择不同的处理方法
-        if data_length > 1000000:  # 超大数据集
+        # Route huge series to the chunked washer
+        if data_length > 1000000:  # huge series
             return _data_wash_large(pydas_obj, ChName, method, order, threshold, sseg)
         
         logger.info(f"Cleaning channel '{ChName}' with {method} interpolation (threshold={threshold}σ)")
         
-        # 使用pandas的优化方法计算均值和标准差
+        # Mean and std via pandas
         arr_mean = data_series.mean()
         arr_std = data_series.std()
         
-        # 检测异常值（使用向量化操作）
+        # Vectorised outlier mask
         outlier_mask = np.abs(data_series - arr_mean) > threshold * arr_std
         outlier_count = outlier_mask.sum()
         
         if outlier_count > 0:
             logger.info(f"Found {outlier_count} outliers in channel '{ChName}'")
             
-            # 创建带有NaN值的Series用于插值
+            # Mask outliers as NaN then interpolate
             cleaned_series = data_series.copy()
             cleaned_series[outlier_mask] = np.nan
             
-            # 使用pandas的优化插值方法
+            # pandas interpolate
             try:
                 if method in ['spline', 'polynomial']:
-                    # 这些方法需要order参数
+                    # spline/polynomial need an order
                     filled_series = cleaned_series.interpolate(method=method, order=order, limit_direction='both')
                     logger.info(f"Applied {method} interpolation with order {order}")
                 else:
-                    # 其他方法不需要order参数
+                    # linear (and similar) interpolators
                     filled_series = cleaned_series.interpolate(method=method, limit_direction='both')
                     logger.info(f"Applied {method} interpolation")
                 
-                # 检查是否还有NaN值
+                # Remaining NaNs after interpolate
                 remaining_nans = filled_series.isna().sum()
                 if remaining_nans > 0:
                     logger.warning(f"{remaining_nans} NaN values could not be interpolated")
                     
-                    # 尝试用前向和后向填充处理剩余的NaN值
-                    filled_series = filled_series.fillna(method='ffill').fillna(method='bfill')
+                    # Fill leftover edge NaNs
+                    filled_series = filled_series.ffill().bfill()
                     
-                    # 再次检查
+                    # Re-check after ffill/bfill
                     remaining_nans = filled_series.isna().sum()
                     if remaining_nans > 0:
                         logger.error(f"{remaining_nans} NaN values still remain after additional filling")
                     else:
                         logger.info("Remaining NaN values filled with forward/backward fill")
                 
-                # 更新数据
+                # Write cleaned series back
                 pydas_obj.data[sseg][ChName] = filled_series.values
                 
             except Exception as e:
@@ -555,14 +557,14 @@ def data_wash(pydas_obj, ChName, method='linear', order=5, threshold=3, sseg=0):
         else:
             logger.info(f"No outliers found in channel '{ChName}'")
         
-        # 手动更新统计信息，避免列不匹配问题
+        # Update stats in Mean/STD/Max/Min/Unit order
         series = pydas_obj.data[sseg][ChName].values
         
-        # 获取单位
+        # Channel unit
         unit_idx = np.where(pydas_obj.chInfo['Name'].values == ChName)[0][0]
         unit = pydas_obj.chInfo['Unit'].values[unit_idx]
         
-        # 手动计算统计量并更新
+        # Write mean/std/max/min/unit
         pydas_obj.segStatis[sseg].loc[ChName] = [
             np.mean(series), np.std(series), np.amax(series), np.amin(series), unit]
             
@@ -574,50 +576,50 @@ def data_wash(pydas_obj, ChName, method='linear', order=5, threshold=3, sseg=0):
 
 def _data_wash_large(pydas_obj, ChName, method='linear', order=5, threshold=3, sseg=0):
     """
-    优化的处理大型数据集的数据清洗方法。
-    通过分块处理来减少内存占用。
+    Chunked outlier cleaning for very long series.
+
     
     Parameters:
     -----------
-    同data_wash方法
+    Same parameters as data_wash.
     """
     try:
-        # 获取数据
+        # Load channel samples
         data = pydas_obj.data[sseg][ChName].values
         data_length = len(data)
         
         logger.info(f"Using optimized method for large dataset ({data_length} points)")
         
-        # 计算全局均值和标准差
+        # Global mean and std for the threshold
         global_mean = np.mean(data)
         global_std = np.std(data)
         
-        # 分块大小
-        chunk_size = min(100000, data_length // 10)  # 确保至少分10块
+        # Chunk size
+        chunk_size = min(100000, data_length // 10)  # at least ~10 chunks
         
-        # 创建输出数组
+        # Working copy
         output_data = np.copy(data)
         total_outliers = 0
         
-        # 分块处理
+        # Process chunks
         for start in range(0, data_length, chunk_size):
             end = min(start + chunk_size, data_length)
             chunk = data[start:end]
             
-            # 在当前块中检测异常值
+            # Outliers in this chunk
             outlier_mask = np.abs(chunk - global_mean) > threshold * global_std
             outlier_indices = np.where(outlier_mask)[0] + start
             chunk_outlier_count = len(outlier_indices)
             total_outliers += chunk_outlier_count
             
             if chunk_outlier_count > 0:
-                # 将异常值设为NaN
+                # Mark outliers as NaN
                 output_data[outlier_indices] = np.nan
         
         if total_outliers > 0:
             logger.info(f"Found {total_outliers} outliers in channel '{ChName}'")
             
-            # 使用pandas的Series进行高效插值
+            # Interpolate via pandas
             series = pd.Series(output_data)
             
             try:
@@ -626,15 +628,15 @@ def _data_wash_large(pydas_obj, ChName, method='linear', order=5, threshold=3, s
                 else:
                     filled_series = series.interpolate(method=method, limit_direction='both')
                 
-                # 处理边缘的NaN值
-                filled_series = filled_series.fillna(method='ffill').fillna(method='bfill')
+                # Fill edge NaNs
+                filled_series = filled_series.ffill().bfill()
                 
-                # 检查是否还有NaN值
+                # Remaining NaNs after interpolate
                 remaining_nans = filled_series.isna().sum()
                 if remaining_nans > 0:
                     logger.warning(f"{remaining_nans} NaN values could not be filled")
                 
-                # 更新数据
+                # Write cleaned series back
                 pydas_obj.data[sseg][ChName] = filled_series.values
                 
             except Exception as e:
@@ -643,14 +645,14 @@ def _data_wash_large(pydas_obj, ChName, method='linear', order=5, threshold=3, s
         else:
             logger.info(f"No outliers found in channel '{ChName}'")
         
-        # 手动更新统计信息，避免列不匹配问题
+        # Update stats in Mean/STD/Max/Min/Unit order
         cleaned_data = pydas_obj.data[sseg][ChName].values
         
-        # 获取单位
+        # Channel unit
         unit_idx = np.where(pydas_obj.chInfo['Name'].values == ChName)[0][0]
         unit = pydas_obj.chInfo['Unit'].values[unit_idx]
         
-        # 手动计算统计量并更新
+        # Write mean/std/max/min/unit
         pydas_obj.segStatis[sseg].loc[ChName] = [
             np.mean(cleaned_data), np.std(cleaned_data), np.amax(cleaned_data), np.amin(cleaned_data), unit]
             
@@ -694,23 +696,21 @@ def add_diff1(pydas_obj, name, sseg=0, filter=False, filter_cutoff=2):
             dt = 1.0 / pydas_obj.__fs__
             diff_data = diff1d(data, dt)
             logger.info(f"Calculated first derivative of {name}")
-            
-            # Apply filter if requested
-            if filter:
-                diff_data = apply_lowpass_filter(pydas_obj, diff_data, cutoffull=filter_cutoff, 
-                                                    replace=False, returnValue=True)
-            
-            # Determine new unit
-            if 'm' in unit and not '/' in unit:
+
+            if 'm' in unit and '/' not in unit:
                 new_unit = unit + '/s'
-            elif 'deg' in unit and not '/' in unit:
+            elif 'deg' in unit and '/' not in unit:
                 new_unit = unit + '/s'
             else:
                 new_unit = unit + '/s'
-            
-            # Add new channel
+
             new_name = name + '_d1'
             pydas_obj.add_channel(new_name, new_unit, diff_data, pydas_obj.__fs__, sseg=sseg)
+            if filter:
+                apply_lowpass_filter(
+                    pydas_obj, new_name, cutoffull=filter_cutoff,
+                    replace=True, returnValue=False, sseg=sseg,
+                )
             return True
         else:
             logger.error(f"Channel '{name}' does not exist.")
@@ -750,38 +750,26 @@ def add_diff2(pydas_obj, name, sseg=0, filter=False, filter_cutoff=2):
             unit_idx = np.where(pydas_obj.chInfo['Name'].values == name)[0][0]
             unit = pydas_obj.chInfo['Unit'].values[unit_idx]
             
-            # Calculate first derivative
             dt = 1.0 / pydas_obj.__fs__
             diff1_data = diff1d(data, dt)
-            logger.info(f"Calculated first derivative of {name}")
-            
-            # Apply filter if requested
-            if filter:
-                diff1_data = apply_lowpass_filter(pydas_obj, diff1_data, cutoffull=filter_cutoff, 
-                                                     replace=False, returnValue=True)
-            
-            # Calculate second derivative
             diff2_data = diff1d(diff1_data, dt)
             logger.info(f"Calculated second derivative of {name}")
-            
-            # Apply filter if requested
-            if filter:
-                diff2_data = apply_lowpass_filter(pydas_obj, diff2_data, cutoffull=filter_cutoff, 
-                                                     replace=False, returnValue=True)
-            
-            # Determine new unit
-            if 'm' in unit and not '/' in unit:
+
+            if 'm' in unit and '/' not in unit:
                 new_unit = unit + '/s2'
-            elif 'deg' in unit and not '/' in unit:
+            elif 'deg' in unit and '/' not in unit:
                 new_unit = unit + '/s2'
             else:
                 new_unit = unit + '/s2'
-            
-            # Add the new channel
+
             new_name = name + '_d2'
             pydas_obj.add_channel(new_name, new_unit, diff2_data, pydas_obj.__fs__, sseg=sseg)
+            if filter:
+                apply_lowpass_filter(
+                    pydas_obj, new_name, cutoffull=filter_cutoff,
+                    replace=True, returnValue=False, sseg=sseg,
+                )
             logger.info(f"Added second derivative channel {new_name}")
-            
             return True
         else:
             logger.error(f"Channel '{name}' does not exist.")

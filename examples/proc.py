@@ -1,4 +1,9 @@
-# %%
+"""Historical SKLOE lab notebook (pre-refactor API).
+
+This script used names such as CaseData, addCh, lowpassFilter, moveData,
+cutSeries and pst. Those aliases are not on the current PyDAS class.
+See examples/basic_usage.py for the supported API.
+"""
 from CaseData import CaseData
 import pandas as pd
 import numpy as np

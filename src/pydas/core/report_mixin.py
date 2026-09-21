@@ -19,28 +19,26 @@ class ReportMixin:
         printExcel : bool, optional
             If True, export information to an Excel file, default is False
             
-        Returns:
-        --------
-        DataFrame
-            DataFrame containing general information about the data
+        Returns
+        -------
+        pandas.DataFrame
+            DataFrame containing general information about the data.
         """
-        # Create information DataFrame
         info = pd.DataFrame(columns=['Value'])
         info.loc['Filename'] = self.__filename__
-        info.loc['Date'] = self.__date__
+        info.loc['Date'] = getattr(self, '__date__', '')
         info.loc['Scale'] = self.__scale__
         info.loc['Lambda'] = self.__lam__
         info.loc['Sampling frequency'] = '{0:5.2f} Hz'.format(self.__fs__)
         info.loc['Number of channels'] = self.__chN__
         info.loc['Number of segments'] = self.__segN__
-        
-        # Print to console
+
         logger.info('\nGeneral Information:')
         logger.info(info.to_string())
-        
-        # Export to text file if requested
+
+        base = self.__filename__ or 'pydas'
         if printTxt:
-            txt_filename = os.path.splitext(self.__filename__)[0] + '_info.txt'
+            txt_filename = os.path.splitext(base)[0] + '_info.txt'
             with open(txt_filename, 'w') as f:
                 f.write('General Information:\n')
                 f.write(info.to_string())
@@ -49,17 +47,16 @@ class ReportMixin:
                 f.write('\n\nChannel Information:\n')
                 f.write(self.chInfo.to_string())
             logger.info(f"Information exported to: {txt_filename}")
-            
-        # Export to Excel file if requested
+
         if printExcel:
-            excel_filename = os.path.splitext(self.__filename__)[0] + '_info.xlsx'
+            excel_filename = os.path.splitext(base)[0] + '_info.xlsx'
             with pd.ExcelWriter(excel_filename) as writer:
                 info.to_excel(writer, sheet_name='General Info')
                 self.segInfo.to_excel(writer, sheet_name='Segment Info')
                 self.chInfo.to_excel(writer, sheet_name='Channel Info')
             logger.info(f"Information exported to: {excel_filename}")
-            
-        return None
+
+        return info
 
     def print_channel_info(self, printTxt=False, printExcel=False):
         """
@@ -83,7 +80,7 @@ class ReportMixin:
         
         # Export to text file if requested
         if printTxt:
-            txt_filename = os.path.splitext(self.__filename__)[0] + '_channel_info.txt'
+            txt_filename = os.path.splitext(self.__filename__ or 'pydas')[0] + '_channel_info.txt'
             with open(txt_filename, 'w') as f:
                 f.write('Channel Information:\n')
                 f.write(self.chInfo.to_string())
@@ -91,7 +88,7 @@ class ReportMixin:
             
         # Export to Excel file if requested
         if printExcel:
-            excel_filename = os.path.splitext(self.__filename__)[0] + '_channel_info.xlsx'
+            excel_filename = os.path.splitext(self.__filename__ or 'pydas')[0] + '_channel_info.xlsx'
             self.chInfo.to_excel(excel_filename)
             logger.info(f"Channel information exported to: {excel_filename}")
             

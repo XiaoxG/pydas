@@ -65,10 +65,31 @@ class TimeSeries:
         return self.args[1] - self.args[0]
 
     def tospecdata(self, L=None, method="psd", **kwargs):
-        from .analysis import timeseries_to_spectrum
-        nperseg = L if L is not None else min(len(self.data), 1024)
-        w, S = timeseries_to_spectrum(self.args, self.data, nperseg=nperseg)
-        return SpecData1D(S, w)
+        """Estimate a 1-D spectrum from this time series.
+
+        Parameters
+        ----------
+        L : int, optional
+            For ``method='psd'``, Welch segment length. For ``method='cov'``,
+            maximum lag of the autocovariance. Defaults depend on the method.
+        method : {'psd', 'cov'}, optional
+            ``'psd'`` uses Welch's method. ``'cov'`` uses the autocovariance
+            (Wiener–Khinchin) path.
+
+        Returns
+        -------
+        SpecData1D
+        """
+        method = (method or "psd").lower()
+        if method in ("psd", "welch"):
+            from .analysis import timeseries_to_spectrum
+            nperseg = L if L is not None else min(len(self.data), 1024)
+            w, S = timeseries_to_spectrum(self.args, self.data, nperseg=nperseg)
+            return SpecData1D(S, w)
+        if method in ("cov", "covariance"):
+            lag = L if L is not None else min(300, max(len(self.data) - 2, 1))
+            return self.tocovdata(lag=lag).tospecdata()
+        raise ValueError(f"Unknown spectral method '{method}'. Use 'psd' or 'cov'.")
 
     def tocovdata(self, lag=None, **kwargs):
         from .analysis import timeseries_to_acf

@@ -36,12 +36,15 @@ class ChannelMixin:
         - Updates channel information and statistics
         """
         if name not in self.chInfo['Name'].values:
-            # Resample if necessary
-            if fs != self.__fs__:
+            n_sample = int(self.segInfo.iloc[sseg]['N sample'])
+            # First channel on an empty object defines length and sampling rate.
+            if n_sample == 0:
+                n_sample = len(series)
+                self.segInfo.iloc[sseg, self.segInfo.columns.get_loc('N sample')] = n_sample
+                self.__fs__ = fs
+            elif fs != self.__fs__:
                 series = data_change_fs(series, fs, self.__fs__)
-                
-            # Adjust data length if necessary
-            n_sample = self.segInfo.iloc[sseg]['N sample']
+
             if len(series) > n_sample:
                 series = series[:n_sample]
             elif len(series) < n_sample:
@@ -269,16 +272,9 @@ class ChannelMixin:
                 logger.error(f"Channel '{chNew}' already exists in segment {sseg}")
                 raise ValueError(f"Channel '{chNew}' already exists")
                 
-            # 1. 重命名数据DataFrame中的列
             self.data[sseg].rename(columns={chOld: chNew}, inplace=True)
-            
-            # 2. 更新chInfo中的通道名
-            # 找到具有旧通道名的行索引
             ch_mask = self.chInfo['Name'] == chOld
-            # 直接使用布尔掩码更新名称
             self.chInfo.loc[ch_mask, 'Name'] = chNew
-            
-            # 3. 重命名统计表中的索引
             if chOld in self.segStatis[sseg].index:
                 self.segStatis[sseg].rename(index={chOld: chNew}, inplace=True)
             

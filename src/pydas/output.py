@@ -1,10 +1,9 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
 """
 PyDAS Output Module
 Provides data output and file export functionality for the PyDAS system.
 """
 
+import logging
 import os
 import datetime
 import re
@@ -13,7 +12,8 @@ import struct
 import numpy as np
 import pandas as pd
 import scipy.io as sio
-from .logger import logger
+
+logger = logging.getLogger(__name__)
 
 
 def write_data(pydas_obj, filename, sseg='all', ch='all'):

@@ -1,13 +1,13 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
 """
 PyDAS Utilities Module
-Provides common utility functions for the PyDAS system including 
+Provides common utility functions for the PyDAS system including
 numerical differentiation and sampling frequency conversion operations.
 """
 import numpy as np
 from scipy import interpolate
-from .logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Import numba for acceleration
 try:
@@ -67,18 +67,32 @@ def diff1d(series, dx=1.0):
         else:  # Small to medium dataset
             return _diff1d_numba(series_array, dx)
     
-    # Original implementation (fallback if numba is not available)
+    # NumPy fallback when Numba is unavailable.
     n = len(series_array)
     dy = np.zeros_like(series_array)
-    
-    if n <= 6:
-        # For very small arrays, use simple central difference
-        if n == 1:
-            return np.zeros_like(series_array)
-        elif n == 2:
-            dy[0] = (series_array[1] - series_array[0]) / dx
-            dy[1] = dy[0]
-            return dy
+
+    if n == 1:
+        return dy
+    if n == 2:
+        dy[0] = (series_array[1] - series_array[0]) / dx
+        dy[1] = dy[0]
+        return dy
+    if n <= 5:
+        return np.gradient(series_array, dx)
+
+    # Same stencil as the Numba implementation for n > 5.
+    dy[0] = (-series_array[2] + 4 * series_array[1] - 3 * series_array[0]) / (2 * dx)
+    dy[1] = (-series_array[3] + 6 * series_array[2] - 3 * series_array[1] - 2 * series_array[0]) / (6 * dx)
+    dy[2] = (8 * (series_array[3] - series_array[1]) - (series_array[4] - series_array[0])) / (12 * dx)
+    dy[3:-3] = (
+        45 * (series_array[4:-2] - series_array[2:-4])
+        - 9 * (series_array[5:-1] - series_array[1:-5])
+        + (series_array[6:] - series_array[:-6])
+    ) / (60 * dx)
+    dy[-3] = (8 * (series_array[-2] - series_array[-4]) - (series_array[-1] - series_array[-5])) / (12 * dx)
+    dy[-2] = (2 * series_array[-1] + 3 * series_array[-2] - 6 * series_array[-3] + series_array[-4]) / (6 * dx)
+    dy[-1] = (3 * series_array[-1] - 4 * series_array[-2] + series_array[-3]) / (2 * dx)
+    return dy
 
 # Numba-accelerated implementations (compiled at import time if Numba is available)
 if NUMBA_AVAILABLE:
