@@ -341,7 +341,8 @@ class ProcessingMixin:
         chName : str or list
             Name of the channel to filter, or list of channel names
         cutoffull : float, optional
-            Cutoff frequency in Hz, default is 2
+            Full-scale cutoff in rad/s, default is 2. In model scale this is
+            converted as ``cutoffull / (2*pi) * sqrt(lam)``. This is **not** Hertz.
         replace : bool, optional
             Whether to replace original data, default is True
         returnValue : bool, optional
@@ -370,7 +371,8 @@ class ProcessingMixin:
         chName : str or list
             Name of the channel to filter, or list of channel names
         cutoffull : float, optional
-            Cutoff frequency in Hz, default is 2
+            Full-scale cutoff in rad/s, default is 2. In model scale this is
+            converted as ``cutoffull / (2*pi) * sqrt(lam)``. This is **not** Hertz.
         replace : bool, optional
             Whether to replace original data, default is True
         returnValue : bool, optional

@@ -153,7 +153,7 @@ def apply_lowpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVal
                     pydas_obj=temp_pydas,
                     ch_name=[chName, temp_channel_name],
                     sseg=sseg,
-                    title=f"Lowpass Filter Comparison - {chName} (cutoff={cutoffull} Hz, order={order})",
+                    title=f"Lowpass Filter Comparison - {chName} (cutoff={cutoffull} rad/s full-scale, order={order})",
                     alpha=[0.5, 0.8],  # original=0.5, filtered=0.8
                 )
             except Exception as e:
@@ -309,7 +309,7 @@ def apply_highpass_filter(pydas_obj, chName, cutoffull=2, replace=True, returnVa
                     pydas_obj=temp_pydas,
                     ch_name=[chName, temp_channel_name],
                     sseg=sseg,
-                    title=f"Highpass Filter Comparison - {chName} (cutoff={cutoffull} Hz, order={order})",
+                    title=f"Highpass Filter Comparison - {chName} (cutoff={cutoffull} rad/s full-scale, order={order})",
                     alpha=[0.5, 0.8],  # original=0.5, filtered=0.8
                 )
             except Exception as e:
