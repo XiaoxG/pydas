@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.4.1] - 2026-09-22
+
+### Added
+
+- Quality grades gate MPM/EEV: `extreme_analysis` and `channel_report` skip
+  extremes when a channel-segment is `limited` or `bad`. The 19-column
+  delivery table is unchanged (MPM/EEV stay NaN). `repaired` still computes
+  MPM and logs that short-gap repairs are included.
+- Read-only qc flags: NaN/Inf counts, constant channel, record too short for
+  MPM, unsteady startup, Nyquist energy warning, scale hint, filter-not-assessed,
+  multi-segment inconsistency.
+
+### Notes
+
+- Pass `respect_quality=False` to keep the pre-1.4.1 extreme behaviour.
+- Filter-frequency advice and LLM remain out of scope.
+
+---
+
 ## [1.4.0] - 2026-09-21
 
 ### Added

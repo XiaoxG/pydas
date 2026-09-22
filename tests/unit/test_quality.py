@@ -219,3 +219,76 @@ def test_updateST_skips_nan():
     obj.updateST("eta")
     assert np.isfinite(obj.segStatis[0].loc["eta", "Mean"])
     assert np.isfinite(obj.segStatis[0].loc["eta", "STD"])
+
+
+def test_too_short_record_is_limited_for_mpm():
+    t = np.arange(0.0, 5.0, 1.0 / FS)
+    eta = np.sin(2.0 * np.pi * FREQ * t)
+    obj = PyDAS.from_dataframe(pd.DataFrame({"eta": eta}), fs=FS, lam=1.0)
+    qc = obj.qc_report(tz=TZ)
+    assert bool(qc["too_short_for_mpm"].iloc[0])
+    assert qc["grade"].iloc[0] == "limited"
+    assert qc["suggested_action"].iloc[0] == "do_not_use_for_extremes"
+
+
+def test_qc_readonly_columns_exist_and_filter_unassessed():
+    obj = _obj()
+    qc = obj.qc_report(tz=TZ)
+    for col in (
+        "n_nan", "n_inf", "n_upcross", "constant_channel",
+        "too_short_for_mpm", "startup_unsteady", "nyquist_warning",
+        "scale_hint", "filter_assessed", "seg_inconsistent",
+    ):
+        assert col in qc.columns
+    assert bool(qc["filter_assessed"].iloc[0]) is False
+    assert bool(qc["too_short_for_mpm"].iloc[0]) is False
+
+
+def test_extreme_analysis_refuses_limited_clip():
+    obj = _obj()
+    y = obj.data[0]["eta"].to_numpy(copy=True)
+    y[300:315] = 6.0
+    obj.data[0]["eta"] = y
+    res = obj.extreme_analysis("eta", visualization=False, fullscale=False, tz=TZ)
+    assert res is not None
+    assert res["qc_blocked"] is True
+    assert res["qc_grade"] in {"limited", "bad"}
+    assert len(res["all_peaks"]) == 0
+
+
+def test_extreme_analysis_allows_repaired_or_good_after_short_fix():
+    obj = _obj()
+    y = obj.data[0]["eta"].to_numpy(copy=True)
+    y[500] = 25.0
+    obj.data[0]["eta"] = y
+    obj.apply_repair("eta", tz=TZ)
+    res = obj.extreme_analysis("eta", visualization=False, fullscale=False, tz=TZ)
+    assert res is not None
+    assert res["qc_blocked"] is False
+    assert res["qc_grade"] in {"good", "repaired"}
+
+
+def test_extreme_analysis_respect_quality_false_still_runs():
+    obj = _obj()
+    y = obj.data[0]["eta"].to_numpy(copy=True)
+    y[300:315] = 6.0
+    obj.data[0]["eta"] = y
+    res = obj.extreme_analysis(
+        "eta", visualization=False, fullscale=False, tz=TZ, respect_quality=False
+    )
+    assert res is not None
+    assert not res.get("qc_blocked")
+
+
+def test_channel_report_limited_keeps_mpm_columns_nan(tmp_path):
+    obj = _obj()
+    y = obj.data[0]["eta"].to_numpy(copy=True)
+    y[300:315] = 6.0
+    obj.data[0]["eta"] = y
+    out = tmp_path / "limited_report.xlsx"
+    result = obj.channel_report(
+        str(out), sseg=0, fullscale=False, include_charts=False, tz=TZ
+    )
+    assert "MPM_pos" in result.columns
+    assert pd.isna(result["MPM_pos"].iloc[0])
+    assert pd.isna(result["MPM_neg"].iloc[0])

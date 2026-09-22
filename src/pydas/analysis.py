@@ -403,7 +403,8 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                    bins=30, peak_prominence=1.0, peak_distance=None,
                    visualization_backend='matplotlib', save_path=None, save_html=None,
                    fullscale=True, lam=50, return_period_multipliers=[1, 5, 10],
-                   peak_height=None, threshold=None, width=None, wlen=None, rel_height=0.5):
+                   peak_height=None, threshold=None, width=None, wlen=None, rel_height=0.5,
+                   tz=None, respect_quality=True, qc=None):
     """
     Perform extreme value analysis on time series data.
     
@@ -445,6 +446,13 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
         Window length for peak detection.
     rel_height : float, default=0.5
         Relative height for peak width calculation.
+    tz : float, optional
+        Characteristic period (seconds) forwarded to ``qc_report``.
+    respect_quality : bool, default=True
+        When True, ``limited`` / ``bad`` grades skip MPM/EEV instead of
+        fitting extremes on damaged samples.
+    qc : pandas.DataFrame, optional
+        Precomputed ``qc_report`` table.
     
     Returns
     -------
@@ -461,6 +469,8 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
         - 'return_values': Return values for specified return periods
         - 'return_value_confidence_intervals': Confidence intervals for return values
         - 'visualization': The visualization figure (if visualization=True)
+        - 'qc_grade': quality grade used to gate MPM/EEV
+        - 'qc_blocked': True when ``limited``/``bad`` skipped the extreme fit
     """
     try:
         from scipy import optimize
@@ -514,6 +524,35 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
         
         # Convert to hours
         data_duration_hours = data_duration_seconds / 3600
+
+        from .quality.gates import decide_extreme_gate
+        allowed, qc_grade, _qc_row = decide_extreme_gate(
+            pydas_obj,
+            ch_name,
+            sseg=sseg,
+            tz=tz,
+            qc=qc,
+            respect_quality=respect_quality,
+        )
+        if not allowed:
+            logger.warning(
+                "extreme_analysis: refusing MPM/EEV for %s (qc_grade=%s)",
+                ch_name, qc_grade,
+            )
+            return {
+                "peaks_positive": np.array([]),
+                "peaks_negative": np.array([]),
+                "all_peaks": np.array([]),
+                "duration_seconds": data_duration_seconds,
+                "duration_hours": data_duration_hours,
+                "peak_statistics": None,
+                "exceedance_table": None,
+                "extreme_value_model": None,
+                "return_values": {},
+                "qc_grade": qc_grade,
+                "qc_blocked": True,
+                "message": f"QC grade '{qc_grade}' forbids MPM/EEV.",
+            }
         
         # Peak indices via scipy.signal.find_peaks
         # Positive peaks
@@ -541,6 +580,8 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
                 'all_peaks': all_peaks,
                 'duration_seconds': data_duration_seconds,
                 'duration_hours': data_duration_hours,
+                'qc_grade': qc_grade,
+                'qc_blocked': False,
                 'message': "No peaks detected. Try adjusting peak detection parameters."
             }
 
@@ -761,7 +802,9 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
             'extreme_value_model': best_model,
             'return_values': return_values,
             'return_value_confidence_intervals': return_value_confidence_intervals,
-            'return_periods': {'periods': return_periods, 'labels': return_period_labels}
+            'return_periods': {'periods': return_periods, 'labels': return_period_labels},
+            'qc_grade': qc_grade,
+            'qc_blocked': False,
         }
         
         # Create visualization if requested

@@ -15,6 +15,7 @@ GRADE_GOOD = "good"
 GRADE_REPAIRED = "repaired"
 GRADE_LIMITED = "limited"
 GRADE_BAD = "bad"
+MIN_CYCLES_FOR_MPM = 20
 
 GRADE_NOTE = {
     GRADE_GOOD: "Usable for spectrum, statistics, and extremes.",
@@ -70,6 +71,78 @@ def grade_channel(events, n_samples, t_star, repaired, coincident_dc_segment):
     return GRADE_GOOD, "none"
 
 
+def _n_upcross(x):
+    y = np.asarray(x, dtype=float)
+    y = y - np.nanmean(y)
+    if y.size < 3 or not np.isfinite(y).any():
+        return 0
+    return int(np.sum((y[:-1] <= 0.0) & (y[1:] > 0.0)))
+
+
+def _readonly_checks(series, fs, t_star, quant_step, scale_tag="model"):
+    """Read-only flags that do not repair data (plan section 5.3)."""
+    x = np.asarray(series, dtype=float)
+    n = len(x)
+    n_nan = int(np.isnan(x).sum())
+    n_inf = int(np.isinf(x).sum())
+    finite = x[np.isfinite(x)]
+    std = float(np.nanstd(finite)) if finite.size else 0.0
+    duration_s = n / float(fs) if fs else np.nan
+    t_use = float(t_star) if t_star and np.isfinite(t_star) and t_star > 0 else 1.0
+    qs = float(quant_step) if np.isfinite(quant_step) else np.nan
+    constant = bool(
+        finite.size > 0 and np.isfinite(qs) and std <= max(qs, 1e-15) * 2.0
+    )
+    too_short = bool(
+        np.isfinite(duration_s) and duration_s < (MIN_CYCLES_FOR_MPM * t_use)
+    )
+    startup = False
+    if n >= 50:
+        head = max(10, n // 10)
+        s0 = float(np.nanstd(x[:head]))
+        s1 = float(np.nanstd(x[n // 2:]))
+        if s1 > 0 and s0 < 0.3 * s1:
+            startup = True
+    nyquist = False
+    if finite.size >= 64 and fs:
+        centered = finite - np.nanmean(finite)
+        spec = np.abs(np.fft.rfft(centered))
+        if spec.size > 10:
+            tot = float(spec.sum())
+            tail = float(spec[int(0.9 * spec.size):].sum())
+            if tot > 0 and (tail / tot) > 0.25:
+                nyquist = True
+    max_abs = float(np.nanmax(np.abs(finite))) if finite.size else 0.0
+    scale_hint = bool(str(scale_tag) == "model" and max_abs > 30.0)
+    return {
+        "n_nan": n_nan,
+        "n_inf": n_inf,
+        "n_upcross": _n_upcross(x),
+        "constant_channel": constant,
+        "too_short_for_mpm": too_short,
+        "startup_unsteady": startup,
+        "nyquist_warning": nyquist,
+        "scale_hint": scale_hint,
+        "filter_assessed": False,
+        "seg_inconsistent": False,
+    }
+
+
+def _apply_readonly_to_grade(grade, suggested, flags, n_samples):
+    """Escalate a grade for read-only issues; never upgrade a worse grade."""
+    n_samples = max(int(n_samples), 1)
+    nan_frac = (flags["n_nan"] + flags["n_inf"]) / float(n_samples)
+    if flags["constant_channel"] and grade in (GRADE_GOOD, GRADE_REPAIRED, GRADE_LIMITED):
+        return GRADE_BAD, "unusable"
+    if nan_frac > 0.01 and grade in (GRADE_GOOD, GRADE_REPAIRED):
+        return GRADE_LIMITED, "do_not_use_for_extremes"
+    if flags["too_short_for_mpm"] and grade in (GRADE_GOOD, GRADE_REPAIRED):
+        return GRADE_LIMITED, "do_not_use_for_extremes"
+    if flags["startup_unsteady"] and suggested in ("none", ""):
+        suggested = "cut_series"
+    return grade, suggested
+
+
 def assess_segment(pydas_obj, events, sseg=0, preview=None):
     """Build one quality row per channel in ``sseg``.
 
@@ -122,6 +195,14 @@ def assess_segment(pydas_obj, events, sseg=0, preview=None):
             repaired,
             coincident_dc,
         )
+        flags = _readonly_checks(
+            series,
+            fs,
+            t_star if np.isfinite(t_star) else 1.0,
+            channel_quant_step(pydas_obj, name),
+            scale_tag=getattr(pydas_obj, "__scale__", "model"),
+        )
+        grade, suggested = _apply_readonly_to_grade(grade, suggested, flags, n)
         longest_n, longest_s = _longest(ch_ev)
         n_events = 0 if ch_ev is None or ch_ev.empty else int(len(ch_ev))
         n_samples_bad = 0 if ch_ev is None or ch_ev.empty else int(ch_ev["n"].sum())
@@ -153,9 +234,39 @@ def assess_segment(pydas_obj, events, sseg=0, preview=None):
             "std_after": std_after,
             "max_abs_before": max_before,
             "max_abs_after": max_after,
+            "n_nan": flags["n_nan"],
+            "n_inf": flags["n_inf"],
+            "n_upcross": flags["n_upcross"],
+            "constant_channel": flags["constant_channel"],
+            "too_short_for_mpm": flags["too_short_for_mpm"],
+            "startup_unsteady": flags["startup_unsteady"],
+            "nyquist_warning": flags["nyquist_warning"],
+            "scale_hint": flags["scale_hint"],
+            "filter_assessed": flags["filter_assessed"],
+            "seg_inconsistent": flags["seg_inconsistent"],
         })
         logger.info(
             "qc: channel=%s sseg=%s grade=%s events=%s suggested=%s",
             name, sseg, grade, n_events, suggested,
         )
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    nseg = int(getattr(pydas_obj, "__segN__", 1) or 1)
+    if nseg > 1 and not table.empty:
+        std_by = {}
+        names = list(pydas_obj.chInfo["Name"].astype(str))
+        for name in names:
+            vals = []
+            for seg in range(nseg):
+                x = np.asarray(pydas_obj.data[seg][name].values, dtype=float)
+                vals.append(float(np.nanstd(x)))
+            std_by[name] = vals
+        flags = []
+        for rec in table.itertuples(index=False):
+            vals = std_by.get(rec.channel, [])
+            if len(vals) < 2:
+                flags.append(False)
+                continue
+            med = float(np.median(vals))
+            flags.append(bool(med > 0 and (max(vals) - min(vals)) / med > 0.5))
+        table["seg_inconsistent"] = flags
+    return table

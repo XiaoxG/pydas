@@ -107,6 +107,7 @@ preview = data.preview_repair("eta", tz=1.0)     # does not write data
 data.apply_repair("eta", tz=1.0, preview=preview)
 qc = data.qc_report(tz=1.0)                      # good/repaired/limited/bad
 data.detrend("eta", kind="linear")               # independent of repair
+# limited/bad skip MPM/EEV in extreme_analysis and channel_report
 ```
 
 Default policy is `short_only`: only short spike/dropout bursts are filled (linear if `n<=3`, otherwise PCHIP). Clip, file-edge runs, and medium/long gaps are reported, not invented. See `docs/user-guide.md`.

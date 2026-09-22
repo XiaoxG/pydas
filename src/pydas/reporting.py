@@ -851,7 +851,8 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
                   zerocrossing_analysis=True, amplitude_analysis=True,
                   cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,
                   mpm_method='POT', frequency_separation=False,
-                  wave_type='irregular', metrics=None):
+                  wave_type='irregular', metrics=None,
+                  tz=None, respect_quality=True, qc=None):
     """
     Generate a detailed Excel analysis report for all channels in a PyDAS object,
     with optional high/low frequency separation.
@@ -924,6 +925,13 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         Explicit list of metric IDs that defines the exact set / order of
         report columns. When *None*, the default set of ``wave_type`` is used.
         See :data:`METRIC_CATALOG` for valid IDs.
+    tz : float, optional
+        Characteristic period (seconds) used by the quality gate.
+    respect_quality : bool, default=True
+        When True, channels graded ``limited`` / ``bad`` skip MPM/EEV (values
+        stay NaN). The 19-column layout is unchanged.
+    qc : pandas.DataFrame, optional
+        Precomputed ``qc_report`` table.
 
     Returns
     -------
@@ -938,6 +946,8 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
       19-column report.
     - Setting ``wave_type='regular'`` yields a lean report focused on linear /
       regular wave tests where MPM/EEV are not meaningful.
+    - ``limited`` / ``bad`` quality grades skip MPM/EEV per channel without
+      adding columns to the delivery table.
     - Analysis may take time for large datasets.
     """
     # Validate segment index
@@ -958,6 +968,15 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
     logger.info(
         f"Channel report wave_type='{wave_type}', "
         f"{len(metric_ids)} metric column(s), compute_extremes={compute_extremes}.")
+
+    qc_table = qc
+    if respect_quality and compute_extremes and qc_table is None:
+        try:
+            from .quality.report import qc_report
+            qc_table = qc_report(pydas_obj, sseg=sseg, tz=tz)
+        except Exception as exc:
+            logger.warning("qc_report failed; MPM proceeds without a grade: %s", exc)
+            qc_table = None
 
     if fullscale:
         # Resolve scale factor
@@ -1028,8 +1047,29 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         # Get scaled channel data
         data_scaled = pydas_analysis.data[sseg][ch_name].values
 
+        ch_compute = compute_extremes
+        if respect_quality and qc_table is not None and not getattr(qc_table, "empty", True):
+            from .quality.gates import GRADE_REPAIRED, grade_allows_extremes
+            qrows = qc_table.loc[qc_table["channel"].astype(str) == str(ch_name)]
+            if not qrows.empty:
+                grade = str(qrows["grade"].iloc[0])
+                if not grade_allows_extremes(grade):
+                    ch_compute = False
+                    logger.warning(
+                        "channel_report: skipping MPM/EEV for %s (grade=%s)",
+                        ch_name, grade,
+                    )
+                elif grade == GRADE_REPAIRED:
+                    logger.warning(
+                        "channel_report: %s grade=repaired; MPM/EEV includes short-gap repairs",
+                        ch_name,
+                    )
+
+        ch_kwargs = dict(common_kwargs)
+        ch_kwargs["compute_extremes"] = ch_compute
+
         # Analyse total (unfiltered) data
-        results_total_ch = analyze_channel_data(data_scaled, **common_kwargs)
+        results_total_ch = analyze_channel_data(data_scaled, **ch_kwargs)
         results_total.loc[ch_idx] = _build_results_row(
             ch_idx, ch_name, ch_unit, results_total_ch, metric_ids)
 
@@ -1038,8 +1078,8 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
             data_low = pydas_analysis.apply_lowpass_filter(ch_name, cutoff_freq, returnValue=True)
             data_high = pydas_analysis.apply_highpass_filter(ch_name, cutoff_freq, returnValue=True)
 
-            results_low_ch = analyze_channel_data(data_low, **common_kwargs)
-            results_high_ch = analyze_channel_data(data_high, **common_kwargs)
+            results_low_ch = analyze_channel_data(data_low, **ch_kwargs)
+            results_high_ch = analyze_channel_data(data_high, **ch_kwargs)
 
             results_low.loc[ch_idx] = _build_results_row(
                 ch_idx, ch_name, ch_unit, results_low_ch, metric_ids)

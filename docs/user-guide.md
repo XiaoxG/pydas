@@ -316,6 +316,8 @@ data.detrend("fx", kind="linear")                 # 独立去趋势，不是 rep
 
 相对 `T*` 的段长：短段 `≤0.10 T*` 可替换；中段 `0.10–0.30 T*` 与长段 `>0.30 T*` 只进报告。贴边事件建议 `cut_series`，不要插值。
 
+`extreme_analysis` 和 `channel_report` 的 MPM/EEV **尊重质量等级**：`limited` / `bad` 拒绝极值（结果为空或 NaN），**不**往 19 列交付表加列。`repaired` 仍算 MPM，但 log 会写明含短修复。需要旧行为时传 `respect_quality=False`。`qc_report` 另有只读警告列（过短、未切启动段、NaN、恒通道、贴奈奎斯特等），不做自动处理。
+
 ---
 
 ## 14. 常见坑

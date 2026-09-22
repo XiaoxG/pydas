@@ -104,7 +104,8 @@ class ReportMixin:
                       zerocrossing_analysis=True, amplitude_analysis=True,
                       cutoffperiod=15.0, peak_distance=10, pot_threshold_factor=1.5,
                       mpm_method='POT', frequency_separation=False,
-                      wave_type='irregular', metrics=None):
+                      wave_type='irregular', metrics=None,
+                      tz=None, respect_quality=True, qc=None):
         """
         Generate a detailed Excel analysis report for all channels in this PyDAS object.
 
@@ -200,6 +201,8 @@ class ReportMixin:
         -----
         - Default ``wave_type='irregular'`` reproduces the original 19-column
           report.
+        - ``limited`` / ``bad`` quality grades skip MPM/EEV (values stay NaN)
+          without adding columns.
         - Output format is compatible with standard ocean engineering data
           processing tools.
         """
@@ -231,6 +234,9 @@ class ReportMixin:
             frequency_separation=frequency_separation,
             wave_type=wave_type,
             metrics=metrics,
+            tz=tz,
+            respect_quality=respect_quality,
+            qc=qc,
         )
 
     def print_statistics(self, printTxt=False, printExcel=False):

@@ -79,10 +79,12 @@ class AnalysisMixin:
                       peak_prominence=1.0, peak_distance=None,
                       visualization_backend='matplotlib', save_path=None, save_html=None,
                       fullscale=True, lam=None, return_period_multipliers=[1, 5, 10],
-                      peak_height=None, threshold=None, width=None, wlen=None, rel_height=0.5):
+                      peak_height=None, threshold=None, width=None, wlen=None, rel_height=0.5,
+                      tz=None, respect_quality=True, qc=None):
         """Perform extreme value analysis on a channel.
 
         Wrapper for :func:`pydas.analysis.extreme_analysis`.
+        ``limited`` / ``bad`` quality grades skip MPM/EEV (see ``qc_report``).
         """
         if fullscale and lam is None and hasattr(self, '__lam__'):
             lam = self.__lam__
@@ -91,4 +93,5 @@ class AnalysisMixin:
                                 peak_prominence, peak_distance,
                                 visualization_backend, save_path, save_html,
                                 fullscale, lam, return_period_multipliers,
-                                peak_height, threshold, width, wlen, rel_height)
+                                peak_height, threshold, width, wlen, rel_height,
+                                tz=tz, respect_quality=respect_quality, qc=qc)
