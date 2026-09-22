@@ -1,6 +1,26 @@
 # Changelog
 
-## [1.4.1] - 2026-09-22
+## [1.4.2] - 2026-09-22
+
+### Changed
+
+- Teaching docs treat the laboratory **processing pipeline** as the spine.
+  `docs/user-guide.md` (Chinese) now starts from that sequence; quality
+  detect / preview / apply / qc sits on the chain, not after the API list.
+- `examples/lab_workflow.py` plants startup, spike, dropout, and clip
+  defects and walks the same spine; audit files are written beside `.out`.
+- README ten-minute start points at the user guide and lab workflow instead
+  of teaching load → filter → spectrum as the default path.
+- Report metric catalogues note a third cause of MPM/EEV NaN: quality grade
+  `limited` / `bad`. The 19-column delivery table is unchanged.
+
+### Notes
+
+- `examples/proc.py` moved to `examples/historical/` (do not run).
+- Filter-frequency advice, LLM, and Phase 7 grade-honesty code are still
+  out of scope.
+
+---
 
 ### Added
 

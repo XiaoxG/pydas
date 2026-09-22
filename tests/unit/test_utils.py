@@ -8,7 +8,7 @@ import pydas.utils as utils
 
 def test_package_version():
     """Installed / source package version is exported on the package."""
-    assert pydas.__version__ == "1.4.1"
+    assert pydas.__version__ == "1.4.2"
 
 
 def test_diff1d_sine_error():

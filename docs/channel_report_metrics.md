@@ -12,7 +12,7 @@
 4. [基本统计量](#4-基本统计量)
 5. [零穿越分析指标](#5-零穿越分析指标)
 6. [幅值分析指标](#6-幅值分析指标)
-7. [极值估计指标 (MPM / EEV)](#7-极值估计指标-mpm--eev)
+7. [极值估计指标 (MPM / EEV)](#7-极值估计指标-mpm--eev)（含质量门导致的 NaN）
 8. [信号特征指标](#8-信号特征指标)
 9. [频率分离分析（可选）](#9-频率分离分析可选)
 10. [尺度换算说明](#10-尺度换算说明)
@@ -312,6 +312,20 @@ $$H_{\sigma} = 2\sqrt{2}\,\sigma \approx 2.828\,\sigma$$
 极值估计是海洋工程数据分析的核心环节，用于从有限时长的测试数据推断给定时长或重现期内的极端响应。PyDAS 支持两种方法：**POT（超门限峰值）法**（默认）和 **STD（标准差）法**。
 
 > **注意**：当 `wave_type='regular'` 且 `metrics` 中未包含任何 MPM/EEV 指标时，整个极值计算管线会被自动跳过，对应单元格不会出现在报告中。
+
+### 质量门导致的 NaN（先看这个）
+
+`channel_report(..., respect_quality=True)`（默认）会在算 MPM/EEV 之前看 `qc_report` 的 grade。通道-段为 `limited` 或 `bad` 时，**不拟合极值**，`MPM_pos` / `MPM_neg` / `EEV_pos` / `EEV_neg` 为 **NaN**。
+
+这与下面「Tz = 0」或「σ = 0」不是同一类空值。处理顺序：
+
+1. 打开同一次交付的 `qc_report` Excel（或重新 `data.qc_report(tz=...)`）。
+2. 看 `grade` 与 `suggested_action`。常见原因：未切的启动段、clip、中长 dropout、记录太短、恒通道。
+3. **不要** 为此往 19 列主表加 grade 列——列集冻结，其它软件和历史模板在读这张表。质量表是旁路文件。
+
+交付习惯：`case.out` + `case_qc.xlsx` + `case_repair_log.csv` + `channel_report.xlsx`。处理链见 [user-guide.md](user-guide.md) 第 3、7、11 节。
+
+---
 
 ### 7.1 `MPM_pos`（正向最可能最大值）
 

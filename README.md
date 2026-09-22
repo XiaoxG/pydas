@@ -2,7 +2,7 @@
 
 Python Data Analysis System for ocean-engineering time series.
 
-PyDAS reads laboratory binary `.out` files, keeps channels and segments on one object, then filters, scales, analyses, plots, and writes reports. The public entry point is:
+PyDAS reads laboratory binary `.out` files, keeps channels and segments on one object, then inspects, cuts, repairs short bad bursts, grades quality, filters, scales, analyses, plots, and writes reports. The public entry point is:
 
 ```python
 from pydas import PyDAS
@@ -30,31 +30,49 @@ pip install -e ".[performance]"  # optional large-dataset extras
 
 ## Ten-minute start
 
+Do **not** treat “load → lowpass → spectrum → write” as the laboratory path.
+The processing spine is:
+
+```
+read .out → inspect → cut_series → detect_bad_events → preview_repair
+  → apply_repair → qc_report → remove_mean / detrend → filter
+  → spectrum / extremes / Excel → write .out
+  + sidecar qc.xlsx and repair_log.csv (audit is not stored in the pack)
+```
+
+Detect and repair **before** filtering. `qc_report` means a short burst is
+repaired only **after** `apply_repair`. If MPM/EEV in `channel_report` is NaN,
+open the qc table (`limited` / `bad`), do not start by changing the formula.
+`cutoffull` is full-scale rad/s, not Hertz.
+
 ```python
 from pydas import PyDAS
+
+# Preferred laboratory path: binary .out (constructor does not guess CSV/MAT)
+data = PyDAS(filename="case.out", lam=36)
+data.print_info()
+data.plot_channel("Wave1", plotbackend="matplotlib", show=False, save_path="wave1.png")
+```
+
+The full chain — including planted defects, `tz`, refused clip/edge events,
+and the four-file delivery set — is in [`docs/user-guide.md`](docs/user-guide.md)
+(Chinese teaching guide) and [`examples/lab_workflow.py`](examples/lab_workflow.py).
+[`examples/basic_usage.py`](examples/basic_usage.py) is only a smoke-test of
+imports, plotting, and a spectrum; it is not the basin workflow.
+
+When you do not have an `.out` file:
+
+```python
 import numpy as np
 import pandas as pd
+from pydas import PyDAS
 
-# 1) Preferred laboratory path: binary .out
-data = PyDAS(filename="case.out", lam=36)
-data.print_statistics()
-data.plot_channel("Wave1", plotbackend="matplotlib", show=False, save_path="wave1.png")
-
-# 2) Build from a DataFrame when you do not have an .out file
 fs = 50.0
 t = np.arange(0, 20, 1 / fs)
 df = pd.DataFrame({"eta": np.sin(2 * np.pi * 0.5 * t)})
 data = PyDAS.from_dataframe(df, fs=fs, lam=1.0, units={"eta": "m"})
-
-# 3) Or read CSV/TSV explicitly (constructor does not guess text formats)
-data = PyDAS.read_csv("eta.csv", fs=50.0, lam=1.0, units={"eta": "m"})
-
-data.apply_lowpass_filter("eta", cutoffull=2.0)   # full-scale rad/s, not Hz
-spec = data.spectral_analysis("eta", method="cov", L=256, plot=False)
-data.write("eta_copy.out")
+# or: data = PyDAS.read_csv("eta.csv", fs=50.0, lam=1.0, units={"eta": "m"})
 ```
-
-Runnable copies of these patterns are in [`examples/basic_usage.py`](examples/basic_usage.py) and [`examples/lab_workflow.py`](examples/lab_workflow.py). A Chinese teaching guide is in [`docs/user-guide.md`](docs/user-guide.md).
 
 ## What the object stores
 
@@ -95,11 +113,14 @@ Report column meanings are documented in Chinese in [`docs/channel_report_metric
 - Plotting uses `plotbackend='plotly'|'matplotlib'|'seaborn'`. There is no `use_plotly=True`.
 - `cutoffull` is **full-scale rad/s**. In model scale the implemented cutoff is `cutoffull / (2π) * sqrt(λ)` in Hz. It is not a Hertz argument.
 - `spectral_analysis(..., method='cov')` is the autocovariance estimator; `method='psd'` is Welch.
-- `examples/proc.py` is a historical lab notebook (`CaseData`, `addCh`, …). Those names are not on `PyDAS`.
+- `examples/historical/proc.py` is a historical lab notebook (`CaseData`, `addCh`, …). Those names are not on `PyDAS`. Do not run it.
 - The `.out` on-disk layout is **frozen**. Other software reads the same pack. Do not change header widths, reserved bytes, int16 scaling, or 128-byte alignment.
 - `data_wash` is a global 3σ interpolator. Do not use it on irregular-wave crests. Use `detect_bad_events` / `apply_repair` (`short_only`) for bursts. Audit is `repair_log`, not the `.out` file.
 
 ## Data quality and short-gap repair
+
+These methods sit **on the spine above**, between cutting the window and
+removing the mean. Skipping them is how a 25-count spike reaches MPM.
 
 ```python
 events = data.detect_bad_events("eta", tz=1.0)   # read-only event table
@@ -110,7 +131,7 @@ data.detrend("eta", kind="linear")               # independent of repair
 # limited/bad skip MPM/EEV in extreme_analysis and channel_report
 ```
 
-Default policy is `short_only`: only short spike/dropout bursts are filled (linear if `n<=3`, otherwise PCHIP). Clip, file-edge runs, and medium/long gaps are reported, not invented. See `docs/user-guide.md`.
+Default policy is `short_only`: only short spike/dropout bursts are filled (linear if `n<=3`, otherwise PCHIP). Clip, file-edge runs, and medium/long gaps are reported, not invented. A grade of `repaired` is only a completed repair after `apply_repair`. See `docs/user-guide.md`.
 
 ## Package layout
 
@@ -136,11 +157,11 @@ Mixins on `PyDAS` are thin proxies. Shared kernels live in `core/state.py`, `cor
 ## Examples
 
 ```bash
-python examples/basic_usage.py
-python examples/lab_workflow.py
+python examples/lab_workflow.py    # full laboratory spine (planted defects)
+python examples/basic_usage.py     # smallest API smoke-test, not the basin path
 ```
 
-See [`examples/README.md`](examples/README.md).
+See [`examples/README.md`](examples/README.md). Do not run `examples/historical/proc.py`.
 
 ## Tests
 
