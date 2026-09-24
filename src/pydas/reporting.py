@@ -970,13 +970,15 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         f"{len(metric_ids)} metric column(s), compute_extremes={compute_extremes}.")
 
     qc_table = qc
+    qc_failed = False
     if respect_quality and compute_extremes and qc_table is None:
         try:
             from .quality.report import qc_report
             qc_table = qc_report(pydas_obj, sseg=sseg, tz=tz)
         except Exception as exc:
-            logger.warning("qc_report failed; MPM proceeds without a grade: %s", exc)
+            logger.warning("qc_report failed; MPM/EEV refused: %s", exc)
             qc_table = None
+            qc_failed = True
 
     if fullscale:
         # Resolve scale factor
@@ -1048,7 +1050,13 @@ def channel_report(pydas_obj, output_file='channel_report.xlsx', sseg=0, fullsca
         data_scaled = pydas_analysis.data[sseg][ch_name].values
 
         ch_compute = compute_extremes
-        if respect_quality and qc_table is not None and not getattr(qc_table, "empty", True):
+        if respect_quality and qc_failed:
+            ch_compute = False
+            logger.warning(
+                "channel_report: skipping MPM/EEV for %s (qc_report failed)",
+                ch_name,
+            )
+        elif respect_quality and qc_table is not None and not getattr(qc_table, "empty", True):
             from .quality.gates import GRADE_REPAIRED, grade_allows_extremes
             qrows = qc_table.loc[qc_table["channel"].astype(str) == str(ch_name)]
             if not qrows.empty:

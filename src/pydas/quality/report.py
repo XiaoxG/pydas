@@ -26,6 +26,9 @@ def qc_report(
 
     Does not modify channel samples. Grades are English ids
     ``good`` / ``repaired`` / ``limited`` / ``bad``.
+    ``repaired`` is used only when ``repair_log`` records a written
+    short repair. A suggested repair that was not applied grades
+    ``limited`` with ``suggested_action='apply_repair'``.
     The binary ``.out`` pack cannot store this table.
 
     Parameters

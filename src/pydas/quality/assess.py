@@ -32,13 +32,37 @@ def _longest(events):
     return int(events.loc[i, "n"]), float(events.loc[i, "duration_s"])
 
 
-def grade_channel(events, n_samples, t_star, repaired, coincident_dc_segment):
-    """Return ``(grade, suggested_action)`` for one channel in one segment."""
+def _channel_repair_applied(pydas_obj, name, sseg):
+    """True when ``repair_log`` records a written short repair for this channel."""
+    log = getattr(pydas_obj, "repair_log", None)
+    if log is None or getattr(log, "empty", True):
+        return False
+    rows = log
+    if "channel" in rows.columns:
+        rows = rows.loc[rows["channel"].astype(str) == str(name)]
+    if "sseg" in rows.columns:
+        rows = rows.loc[rows["sseg"] == int(sseg)]
+    if "action" in rows.columns:
+        rows = rows.loc[rows["action"].astype(str) == "repair"]
+    return not rows.empty
+
+
+def grade_channel(
+    events, n_samples, t_star, repaired, coincident_dc_segment, pending_repair=False,
+):
+    """Return ``(grade, suggested_action)`` for one channel in one segment.
+
+    ``repaired`` must mean samples were written back (``repair_log``).
+    A suggested short repair that was not applied is ``pending_repair``
+    and grades ``limited`` so MPM/EEV cannot eat the fake peak.
+    """
     t_star = float(t_star) if t_star and np.isfinite(t_star) else 1.0
     n_samples = max(int(n_samples), 1)
     if events is None or events.empty:
         if coincident_dc_segment:
             return GRADE_LIMITED, "do_not_use_for_extremes"
+        if repaired:
+            return GRADE_REPAIRED, "none"
         return GRADE_GOOD, "none"
 
     frac = float(events["n"].sum()) / float(n_samples)
@@ -64,6 +88,8 @@ def grade_channel(events, n_samples, t_star, repaired, coincident_dc_segment):
     if has_clip or medium_mask.any():
         action = "cut_series" if has_edge else "do_not_use_for_extremes"
         return GRADE_LIMITED, action
+    if pending_repair:
+        return GRADE_LIMITED, "apply_repair"
     if repaired:
         return GRADE_REPAIRED, "none"
     if has_edge:
@@ -173,11 +199,12 @@ def assess_segment(pydas_obj, events, sseg=0, preview=None):
         )
         t_star = float(ch_ev["t_star"].iloc[0]) if ch_ev is not None and not ch_ev.empty else np.nan
         t_src = ch_ev["t_star_source"].iloc[0] if ch_ev is not None and not ch_ev.empty else ""
-        repaired = False
-        if ch_ev is not None and not ch_ev.empty:
-            repaired = bool((ch_ev["action"] == "repair").any())
-        if preview is not None and name in preview.series:
-            repaired = repaired or bool(len(preview.applied.loc[preview.applied["channel"] == name]))
+        repaired = _channel_repair_applied(pydas_obj, name, sseg)
+        pending_repair = False
+        if ch_ev is not None and not ch_ev.empty and "action" in ch_ev.columns:
+            # Suggested repairs still sitting on the event table are pending
+            # even if an earlier apply_repair wrote some other events.
+            pending_repair = bool((ch_ev["action"] == "repair").any())
 
         std_before = float(np.nanstd(series))
         max_before = float(np.nanmax(np.abs(series))) if n else np.nan
@@ -194,6 +221,7 @@ def assess_segment(pydas_obj, events, sseg=0, preview=None):
             t_star if np.isfinite(t_star) else 1.0,
             repaired,
             coincident_dc,
+            pending_repair=pending_repair,
         )
         flags = _readonly_checks(
             series,

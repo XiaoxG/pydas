@@ -60,21 +60,29 @@ def test_spectral_analysis_integration(pydas_instance):
     assert len(spec.data) > 0
 
 def test_full_workflow(pydas_instance, tmp_path):
-    """Test a complete analysis workflow."""
+    """Laboratory spine: detect -> apply -> qc -> mean -> filter -> analysis."""
     ch_name = pydas_instance.chInfo['Name'].iloc[0]
-    
-    # 1. Preprocessing
+    y = pydas_instance.data[0][ch_name].to_numpy(copy=True)
+    y[len(y) // 2] = float(np.nanmax(np.abs(y))) + 80.0
+    pydas_instance.data[0][ch_name] = y
+    tz = 10.0
+
+    events = pydas_instance.detect_bad_events(ch_name, tz=tz)
+    preview = pydas_instance.preview_repair(ch_name, tz=tz, events=events)
+    pydas_instance.apply_repair(ch_name, tz=tz, preview=preview)
+    qc = pydas_instance.qc_report(tz=tz)
+    assert not qc.empty
+    assert qc.loc[qc["channel"] == ch_name, "grade"].iloc[0] in {
+        "good", "repaired", "limited", "bad",
+    }
+
     pydas_instance.remove_mean(ch_name)
-    
-    # 2. Filtering
     pydas_instance.apply_lowpass_filter(ch_name, cutoffull=2.0)
-    
-    # 3. Spectral Analysis
     spec = pydas_instance.spectral_analysis(ch_name, plot=False)
-    
-    # 4. Statistics
+    assert spec is not None
     stats = pydas_instance.statistic_analysis(ch_name, visualization=False)
     assert stats is not None
-    
-    # 5. Export (mock or check output)
-    # Just check no exceptions raised
+    ext = pydas_instance.extreme_analysis(
+        ch_name, visualization=False, tz=tz, qc=qc
+    )
+    assert ext is not None

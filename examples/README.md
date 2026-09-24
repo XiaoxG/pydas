@@ -1,17 +1,13 @@
-# Examples
+# 示例
 
-These scripts use the **current** `PyDAS` API. Run them from the repository
-root after `pip install -e .`.
+这些脚本使用 **当前** `PyDAS` API。在仓库根目录 `pip install -e .` 之后运行。
 
-The laboratory processing spine is documented in Chinese in
-[`docs/user-guide.md`](../docs/user-guide.md). Copy `lab_workflow.py` for
-basin tests. Do not start from `remove_mean` → filter → report.
+实验室处理脊骨写在中文指南 [`docs/user-guide.md`](../docs/user-guide.md)。水池试验请抄 `lab_workflow.py`。不要从「去均值 → 滤波 → 出报告」起步。
 
-| Script | What it shows | Run it? |
-|--------|----------------|---------|
-| [`lab_workflow.py`](lab_workflow.py) | Full spine on a synthetic record **with planted defects**: cut startup, detect, preview, apply short repair, qc grades, sidecar audit files, then mean / detrend / filter / spectrum / Excel. `cutoffull` is full-scale rad/s. | **Yes** — this is the path to copy. |
-| [`basic_usage.py`](basic_usage.py) | Smallest API: `from_dataframe`, channel plot, covariance spectrum, JONSWAP. No quality chain. | Yes, for a smoke check of imports. |
-| [`historical/proc.py`](historical/proc.py) | Historical lab notebook. Names such as `CaseData` / `addCh` are **not** on `PyDAS`. | **Do not run.** |
+| 脚本 | 演示什么 | 要不要跑 |
+|------|----------|----------|
+| [`lab_workflow.py`](lab_workflow.py) | 合成记录上的完整脊骨（种了启动段、尖刺、dropout、clip）：切窗、检测、预览、短修、qc 分级、旁路审计文件，然后去均值 / detrend / 滤波 / 谱 / Excel。`cutoffull` 是足尺 rad/s。 | **要跑** — 这是该抄的路径。 |
+| [`basic_usage.py`](basic_usage.py) | 最小 API：`from_dataframe`、画通道、协方差谱、JONSWAP。没有质量链。 | 可以跑，用来冒烟测试导入。 |
+| [`historical/proc.py`](historical/proc.py) | 历史实验室笔记本。`CaseData` / `addCh` 这类名字 **不在** `PyDAS` 上。 | **不要跑。** |
 
-Headless plotting uses `plotbackend='matplotlib'` and `show=False`. Interactive
-Plotly is available with `plotbackend='plotly'` and `save_html=...`.
+无头绘图用 `plotbackend='matplotlib'` 和 `show=False`。交互 Plotly 用 `plotbackend='plotly'` 和 `save_html=...`。

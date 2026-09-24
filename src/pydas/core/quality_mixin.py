@@ -71,7 +71,11 @@ class QualityMixin:
         preview=None,
         k_mad=6.0,
     ):
-        """Per-channel quality grades: good / repaired / limited / bad."""
+        """Per-channel quality grades: good / repaired / limited / bad.
+
+        ``repaired`` requires a written ``repair_log`` entry. Unapplied
+        short bursts grade ``limited`` so MPM/EEV cannot use the fake peak.
+        """
         return qc_report(
             self,
             sseg=sseg,

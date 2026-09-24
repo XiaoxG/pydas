@@ -450,7 +450,8 @@ def extreme_analysis(pydas_obj, ch_name, sseg=None, visualization=True,
         Characteristic period (seconds) forwarded to ``qc_report``.
     respect_quality : bool, default=True
         When True, ``limited`` / ``bad`` grades skip MPM/EEV instead of
-        fitting extremes on damaged samples.
+        fitting extremes on damaged samples. A ``qc_report`` failure also
+        refuses MPM/EEV (fail closed). Pass False to keep the old escape hatch.
     qc : pandas.DataFrame, optional
         Precomputed ``qc_report`` table.
     

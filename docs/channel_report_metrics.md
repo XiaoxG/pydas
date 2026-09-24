@@ -320,7 +320,7 @@ $$H_{\sigma} = 2\sqrt{2}\,\sigma \approx 2.828\,\sigma$$
 这与下面「Tz = 0」或「σ = 0」不是同一类空值。处理顺序：
 
 1. 打开同一次交付的 `qc_report` Excel（或重新 `data.qc_report(tz=...)`）。
-2. 看 `grade` 与 `suggested_action`。常见原因：未切的启动段、clip、中长 dropout、记录太短、恒通道。
+2. 看 `grade` 与 `suggested_action`。常见原因：建议短修但未 `apply_repair`（`suggested_action='apply_repair'`）、未切的启动段、clip、中长 dropout、记录太短、恒通道。`repaired` 只表示 `repair_log` 已写回，不是「可以修」。
 3. **不要** 为此往 19 列主表加 grade 列——列集冻结，其它软件和历史模板在读这张表。质量表是旁路文件。
 
 交付习惯：`case.out` + `case_qc.xlsx` + `case_repair_log.csv` + `channel_report.xlsx`。处理链见 [user-guide.md](user-guide.md) 第 3、7、11 节。

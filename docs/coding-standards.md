@@ -6,8 +6,8 @@ facade is frozen; internal code should look like one library.
 ## Language
 
 - Comments, docstrings, and log messages are English.
-- User-facing teaching docs may be Chinese (`docs/user-guide.md`, report metric
-  catalogues). The repository README stays English.
+- User-facing teaching docs are Chinese (`README.md`, `docs/user-guide.md`,
+  `examples/*.md`, report metric catalogues).
 
 ## Docstrings
 

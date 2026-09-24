@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.4.3] - 2026-09-24
+
+### Changed
+
+- ``repaired`` now means a short repair was **written back**. The grade is
+  taken from ``repair_log`` (``action=="repair"``), not from a suggested
+  ``action=="repair"`` on the event table. An unapplied short spike grades
+  ``limited`` with ``suggested_action='apply_repair'`` and blocks MPM/EEV.
+- ``respect_quality=True`` (default) refuses MPM/EEV when ``qc_report``
+  itself fails (fail closed). ``respect_quality=False`` remains the escape
+  hatch.
+- Integration tests walk the laboratory spine (detect → apply → qc → mean
+  → filter → spectrum / extremes). ``data_wash`` is not taught as the full
+  flow; its 3σ algorithm is unchanged.
+- README, examples READMEs, and the teaching tutorial are Chinese. Code
+  comments and log messages stay English.
+
+### Added
+
+- ``test_unrepaired_short_spike_blocks_mpm``: plant a short spike, skip
+  ``apply_repair``, ``extreme_analysis`` must not treat the fake peak as MPM.
+- ``test_qc_report_failure_refuses_mpm``.
+
+### Notes
+
+- Filter-frequency advice, LLM, pack layout, public method names,
+  ``cutoffull`` units, ``data_wash`` algorithm, and the 19-column report
+  layout are unchanged.
+
+---
+
 ## [1.4.2] - 2026-09-22
 
 ### Changed
@@ -21,6 +52,8 @@
   out of scope.
 
 ---
+
+## [1.4.1] - 2026-09-22
 
 ### Added
 

@@ -131,7 +131,8 @@ def test_short_coincident_spikes_still_repair_each_channel():
     assert not events["coincident_dropout_or_clip"].any()
     preview = obj.preview_repair(["eta", "fx"], tz=TZ, events=events)
     assert (preview.events["action"] == "repair").all()
-    qc = obj.qc_report(tz=TZ, events=events, preview=preview)
+    obj.apply_repair(["eta", "fx"], tz=TZ, preview=preview)
+    qc = obj.qc_report(tz=TZ)
     assert set(qc["grade"]) <= {"repaired", "good"}
 
 
@@ -262,10 +263,48 @@ def test_extreme_analysis_allows_repaired_or_good_after_short_fix():
     y[500] = 25.0
     obj.data[0]["eta"] = y
     obj.apply_repair("eta", tz=TZ)
+    qc = obj.qc_report(tz=TZ)
+    assert qc["grade"].iloc[0] == "repaired"
     res = obj.extreme_analysis("eta", visualization=False, fullscale=False, tz=TZ)
     assert res is not None
     assert res["qc_blocked"] is False
     assert res["qc_grade"] in {"good", "repaired"}
+
+
+def test_unrepaired_short_spike_blocks_mpm():
+    obj = _obj()
+    y = obj.data[0]["eta"].to_numpy(copy=True)
+    y[500] = 25.0
+    obj.data[0]["eta"] = y
+    qc = obj.qc_report(tz=TZ)
+    assert qc["grade"].iloc[0] == "limited"
+    assert qc["suggested_action"].iloc[0] == "apply_repair"
+    assert bool(qc["repaired"].iloc[0]) is False
+    assert obj.data[0]["eta"].iloc[500] == pytest.approx(25.0)
+    res = obj.extreme_analysis("eta", visualization=False, fullscale=False, tz=TZ)
+    assert res is not None
+    assert res["qc_blocked"] is True
+    assert len(res["all_peaks"]) == 0
+    preview = obj.preview_repair("eta", tz=TZ)
+    qc_preview = obj.qc_report(tz=TZ, preview=preview)
+    assert qc_preview["grade"].iloc[0] == "limited"
+
+
+def test_qc_report_failure_refuses_mpm(monkeypatch):
+    obj = _obj()
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("qc exploded")
+
+    monkeypatch.setattr("pydas.quality.report.qc_report", boom)
+    res = obj.extreme_analysis("eta", visualization=False, fullscale=False, tz=TZ)
+    assert res is not None
+    assert res["qc_blocked"] is True
+    res_open = obj.extreme_analysis(
+        "eta", visualization=False, fullscale=False, tz=TZ, respect_quality=False
+    )
+    assert res_open is not None
+    assert not res_open.get("qc_blocked")
 
 
 def test_extreme_analysis_respect_quality_false_still_runs():

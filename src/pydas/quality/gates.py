@@ -101,6 +101,8 @@ def decide_extreme_gate(
     """Return ``(allowed, grade, row)`` for MPM/EEV on one channel.
 
     When ``respect_quality`` is False, always ``(True, None, None)``.
+    When ``respect_quality`` is True and ``qc_report`` fails, refuse
+    MPM/EEV (fail closed).
     """
     if not respect_quality:
         return True, None, None
@@ -110,9 +112,10 @@ def decide_extreme_gate(
         )
     except Exception as exc:
         logger.warning(
-            "quality gate skipped for %s: qc_report failed (%s)", ch_name, exc
+            "quality gate failed for %s: qc_report failed (%s); refusing MPM/EEV",
+            ch_name, exc,
         )
-        return True, None, None
+        return False, GRADE_BAD, None
     if rows is None or rows.empty:
         return True, "good", None
     grade = "good"

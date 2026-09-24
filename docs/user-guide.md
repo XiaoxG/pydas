@@ -1,6 +1,6 @@
 # PyDAS 使用指南
 
-面向实验室同事：一次水池 / 海洋工程试验记录，从读进对象到交付，该按什么顺序处理。仓库根目录的 [README.md](../README.md) 是英文总览；**本页是中文教学正文**。报告每一列的公式见 [channel_report_metrics.md](channel_report_metrics.md) 与 [report_appendix_metrics.md](report_appendix_metrics.md)。
+面向实验室同事：一次水池 / 海洋工程试验记录，从读进对象到交付，该按什么顺序处理。仓库根目录的 [README.md](../README.md) 是中文总览（含十分钟路径）；**本页是中文教学正文**。报告每一列的公式见 [channel_report_metrics.md](channel_report_metrics.md) 与 [report_appendix_metrics.md](report_appendix_metrics.md)。
 
 可运行的脊骨示例：[examples/lab_workflow.py](../examples/lab_workflow.py)（合成记录里种了坏段）。最小 API 示例：[examples/basic_usage.py](../examples/basic_usage.py)。不要运行 [examples/historical/proc.py](../examples/historical/proc.py)。
 
@@ -86,9 +86,9 @@ Butterworth 会把尖刺涂开到两侧。先低通再 `detect_bad_events`，Ham
 - `detect_bad_events`：只读事件表。
 - `preview_repair`：内存里预览，**不** 写 `data`。
 - `apply_repair`：这才把短段写回，并追加 `repair_log`。
-- `qc_report`：分级。当前实现会给「*可以* 短修」的事件标上 `action='repair'`，grade 也可能显示 `repaired`，**即使你还没调用 `apply_repair`**。尖刺仍在波形里，MPM 仍可能吃进去。
+- `qc_report`：分级。`repaired` **只** 在 `repair_log` 里已有写回记录时出现。事件表上 `action='repair'` 只是「建议短修」；若还没 `apply_repair`，grade 是 `limited`，`suggested_action='apply_repair'`，MPM/EEV **拒绝**。未修的短尖刺不能当极值。
 
-因此：**只有 `apply_repair` 之后的 `qc_report` 才表示短段已经写进数据。** 只跑 `qc_report` 就出极值，等于没修。完整链见第 4.3 节和 `examples/lab_workflow.py`。
+因此：**只有 `apply_repair` 之后的 `qc_report` 才可能是 `repaired`。** 只跑检测 / 预览 / `qc_report` 就出极值，库会挡住。完整链见第 4.3 节和 `examples/lab_workflow.py`。
 
 ### 3.3 怎么选 `tz`
 
@@ -104,7 +104,7 @@ Butterworth 会把尖刺涂开到两侧。先低通再 `detect_bad_events`，Ham
 
 ### 3.4 MPM / EEV 为 NaN 时先看 `qc_report`
 
-`extreme_analysis` 和 `channel_report` 在 `respect_quality=True`（默认）时：`limited` / `bad` **拒绝** 极值，单元格为 NaN，19 列主表 **不加** grade 列。这不是 Tz=0 或 σ=0 的同一种空。先打开 qc 表，不要先改 `wave_type`。需要旧行为时再传 `respect_quality=False`。
+`extreme_analysis` 和 `channel_report` 在 `respect_quality=True`（默认）时：`limited` / `bad` **拒绝** 极值，单元格为 NaN，19 列主表 **不加** grade 列。这不是 Tz=0 或 σ=0 的同一种空。未修的短尖刺、以及 `qc_report` 自身失败，同样拒绝（fail-closed）。先打开 qc 表，不要先改 `wave_type`。需要旧行为时再传 `respect_quality=False`。
 
 ### 3.5 审计不在 `.out` 里
 
@@ -286,15 +286,15 @@ print(qc[["channel", "grade", "suggested_action", "n_events", "note"]])
 | grade | 含义 | 极值（MPM/EEV） |
 |-------|------|-----------------|
 | `good` | 可用 | 算 |
-| `repaired` | 短段已按策略处理；交付时注明含短修 | 仍算，log 会写明 |
-| `limited` | 不要做极值；谱/统计需谨慎 | **拒绝**（NaN / 空峰值） |
+| `repaired` | 短段已写回 `data`（`repair_log` 有记录）；交付时注明含短修 | 仍算，log 会写明 |
+| `limited` | 不要做极值；谱/统计需谨慎。含「建议短修但未 `apply_repair`」 | **拒绝**（NaN / 空峰值） |
 | `bad` | 不宜正式分析；重采或丢掉该通道 | **拒绝** |
 
-`suggested_action` 常见值：`none`、`cut_series`、`do_not_use_for_extremes`、`unusable`。
+`suggested_action` 常见值：`none`、`apply_repair`、`cut_series`、`do_not_use_for_extremes`、`unusable`。
 
 只读警告列（`too_short_for_mpm`、`startup_unsteady`、`constant_channel`、`nyquist_warning`、`n_nan` 等）是提示，**不自动切窗、不自动滤波**。过短记录、恒通道会升级 grade。`filter_assessed` 恒为 `False`，忽略即可。
 
-再强调第 3.2 节：要让「已修复」成为事实，必须先 `apply_repair`。
+再强调第 3.2 节：`repaired` 只表示已经 `apply_repair`。未写回的建议短修是 `limited`。
 
 ---
 
@@ -511,7 +511,7 @@ t, eta = wm.spectrum_to_timeseries(w, S, duration=600.0, dt=0.05, seed=1)
 9. `to_mat(filename=None, sseg=0)` 必须用关键字传 `sseg`，避免把段号当成文件名。
 10. 旧 `data_wash`（全局 3σ）会误伤不规则波峰；坏段请走 `detect_bad_events` / `apply_repair`。
 11. **不要** 先滤波再检测。
-12. **不要** 只调用 `qc_report` 就认为数据已修；必须 `apply_repair`。
+12. **不要** 只调用 `qc_report` 就认为数据已修；必须 `apply_repair`。未修短尖刺现在会打 `limited` 并挡住 MPM。
 13. `channel_report` 里 MPM 为 NaN 时先看 `qc_report`，不是先怀疑公式。
 14. 不传 `tz` 时慢漂通道不要默默依赖 1 s。
 
