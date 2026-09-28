@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用指南 / User guide
+    url: https://github.com/XiaoxG/pydas/blob/master/docs/user-guide.md
+    about: 先看中文教学指南再提问 / Read the Chinese teaching guide before asking
+  - name: 示例脚本 / Examples
+    url: https://github.com/XiaoxG/pydas/blob/master/examples/README.md
+    about: 实验室脊骨示例是 lab_workflow.py，不是 historical/proc.py

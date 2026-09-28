@@ -1,0 +1,53 @@
+name: 使用提问 / Usage question
+description: 用法、参数或实验室流程不清楚 / How to use an API or the laboratory workflow
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提问前请先看 [`docs/user-guide.md`](https://github.com/XiaoxG/pydas/blob/master/docs/user-guide.md) 和 [`examples/lab_workflow.py`](https://github.com/XiaoxG/pydas/blob/master/examples/lab_workflow.py)。
+
+        常见坑：构造函数只读二进制 `.out`；`cutoffull` 是足尺 rad/s 不是 Hz；`data_wash` 不是质量链；`examples/historical/proc.py` 不要运行。
+  - type: textarea
+    id: question
+    attributes:
+      label: 问题 / Question
+      description: 你想做什么、卡在哪一步。
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已尝试 / What I tried
+      description: 调用过的方法、看过的文档。请贴短代码。
+      render: python
+    validations:
+      required: true
+  - type: dropdown
+    id: data-kind
+    attributes:
+      label: 数据类型 / Data kind
+      options:
+        - 实验室二进制 .out
+        - CSV / 文本表（from_dataframe 或 read_csv）
+        - 尚无数据，只问 API
+        - 其它 / Other
+    validations:
+      required: true
+  - type: textarea
+    id: data-format
+    attributes:
+      label: 数据格式（若相关） / Data format (if relevant)
+      description: 通道名、采样率、比尺、段数，或 CSV 表头。需要时请附很小的样本，不要上传整次试验。
+    validations:
+      required: false
+  - type: input
+    id: pydas-version
+    attributes:
+      label: PyDAS 版本 / PyDAS version
+      description: |
+        `import pydas; print(pydas.__version__)`
+      placeholder: "1.4.3"
+    validations:
+      required: false

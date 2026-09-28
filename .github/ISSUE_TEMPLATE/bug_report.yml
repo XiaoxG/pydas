@@ -1,0 +1,107 @@
+name: 缺陷报告 / Bug report
+description: 报告 PyDAS 行为错误或崩溃 / Report incorrect behaviour or a crash
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请尽量填全下列信息，方便郭老师复现。**请勿把整条试验记录或未脱敏数据贴到公开仓库。**
+
+        Please fill the fields below so the issue can be reproduced. Do **not** upload a full lab record or unsanitized data to this public repository.
+  - type: input
+    id: pydas-version
+    attributes:
+      label: PyDAS 版本 / PyDAS version
+      description: |
+        `import pydas; print(pydas.__version__)`，或 `pyproject.toml` 里的 version。
+      placeholder: "1.4.3"
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python 版本 / Python version
+      description: |
+        `python -V`。PyDAS 需要 Python >= 3.11。
+      placeholder: "3.12.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统 / OS
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - 其它 / Other
+    validations:
+      required: true
+  - type: input
+    id: os-detail
+    attributes:
+      label: 系统细节（可选） / OS details (optional)
+      description: 例如 Windows 11、Ubuntu 22.04。
+      placeholder: "Windows 11 / Ubuntu 22.04"
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为 / Expected
+      description: 你认为应该发生什么。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为 / Actual
+      description: 实际发生了什么。若有 traceback，下面单独贴。
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 最小复现代码 / Minimal repro
+      description: |
+        尽量短、可独立运行。不要贴整个实验室笔记本。公开方法名请保持原样（`chName`、`cutoffull`、`updateST` 等）。
+      render: python
+      placeholder: |
+        from pydas import PyDAS
+        data = PyDAS(filename="case.out", lam=36)
+        data.print_info()
+    validations:
+      required: true
+  - type: textarea
+    id: traceback
+    attributes:
+      label: 错误信息 / Traceback
+      description: 完整 traceback 或报错原文。没有报错就写「无」。
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: data-sample
+    attributes:
+      label: 数据样本 / Data sample
+      description: |
+        复现 I/O、质量链或报告问题时，请附**很小**的样本（数秒到一两分钟、少通道），或至少说明格式。二进制 `.out` 可用 GitHub 附件；不要上传整次水池试验。
+      options:
+        - 将附上小样本（GitHub 附件或链接） / I will attach a small sample
+        - 不能附文件，只能描述格式 / I cannot attach a file; I will describe the format
+        - 不涉及读文件 / Not file-related
+    validations:
+      required: true
+  - type: textarea
+    id: data-format
+    attributes:
+      label: 数据格式说明 / Data format
+      description: |
+        若不能附文件，请写：文件类型（`.out` / CSV / 其它）、通道名、采样率 Hz、比尺 `lam`、段数、问题出在哪一段。CSV 请说明分隔符和表头。
+      placeholder: |
+        类型: 二进制 .out
+        通道: Wave1, Force1
+        fs: 50 Hz
+        lam: 36
+        段: 2 段，问题在第 1 段
+    validations:
+      required: false
