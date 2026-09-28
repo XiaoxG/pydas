@@ -1,0 +1,41 @@
+name: 功能请求 / Feature request
+description: 建议新能力或改进现有 API / Suggest a new capability or API improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        公开方法名、历史驼峰参数（`chName`、`cutoffull`、`updateST` 等）和二进制 `.out` pack 布局是**冻结**的。新功能应尽量加方法或可选参数，而不是改名。
+
+        Public method names, historical camelCase parameters, and the binary `.out` pack layout are **frozen**. Prefer adding methods or optional arguments over renaming.
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题 / Problem
+      description: 现在缺什么、实验室流程卡在哪。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议做法 / Proposal
+      description: 希望增加的方法、参数或文档。能写调用示例更好。
+      placeholder: |
+        data.some_new_method(...)
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现有变通 / Alternatives
+      description: 你现在怎么绕开。没有就写「无」。
+    validations:
+      required: false
+  - type: checkboxes
+    id: frozen-api
+    attributes:
+      label: 范围确认 / Scope
+      options:
+        - label: "我理解这不会去改公开方法名、`.out` pack 布局，或 `cutoffull` 的单位含义 / I am not asking to rename public APIs or change the frozen .out pack"
+          required: true

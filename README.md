@@ -170,6 +170,16 @@ pytest
 
 注释、docstring、log 用英文。面向同事的 README / 指南 / 示例说明用中文。公开方法名和历史驼峰参数不改。新内部函数用 snake_case。细节见 [`docs/coding-standards.md`](docs/coding-standards.md)。
 
+## 提交问题 / Reporting issues
+
+缺陷、新功能或用法问题请用 GitHub 模板开 Issue（不要发空白单）：
+
+- [缺陷报告 / Bug report](https://github.com/XiaoxG/pydas/issues/new?template=bug_report.yml)
+- [功能请求 / Feature request](https://github.com/XiaoxG/pydas/issues/new?template=feature_request.yml)
+- [使用提问 / Usage question](https://github.com/XiaoxG/pydas/issues/new?template=usage_question.yml)
+
+请写明 PyDAS 版本、Python 版本、操作系统，附上最小复现代码和完整 traceback。涉及 `.out` / 质量链 / 报告时，请附很小的数据样本，或说明通道名、采样率、比尺和文件格式。协作约定见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+
 ## License
 
 MIT。见 [`LICENSE`](LICENSE)。
