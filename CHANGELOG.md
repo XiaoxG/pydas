@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- README rewritten in Chinese with the laboratory processing spine on the
+  front page, plus a section for AI coding tools. Stale claims from the
+  old README (Gitee, ``use_plotly``, constructor-reads-CSV, ``cutoffull``
+  as Hz, ``data_wash`` as the normal path, ``.channels``) are not taught.
+
+---
+
 ## [1.4.3] - 2026-09-24
 
 ### Changed
